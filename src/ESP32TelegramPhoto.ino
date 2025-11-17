@@ -245,10 +245,19 @@ void setup(){
 void loop() {
   Serial.println("At the top of loop()");
   if (sendPhoto) {
+
+    // Turn on flash LED before taking a photo
+    digitalWrite(FLASH_LED_PIN, HIGH);
+
     Serial.println("Preparing photo");
     sendPhotoTelegram(); 
-    sendPhoto = false; 
+    sendPhoto = false;
+    Serial.println("Photo sent");
+    
+    // Turn off flash LED after taking a photo
+    digitalWrite(FLASH_LED_PIN, LOW);
   }
+  
   if (millis() > lastTimeBotRan + botRequestDelay)  {
     Serial.println("ADIRX: 1");
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
