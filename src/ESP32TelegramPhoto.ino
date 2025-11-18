@@ -15,7 +15,10 @@ https://RandomNerdTutorials.com/telegram-esp32-cam-photo-arduino/
 #include <UniversalTelegramBot.h>
 #include <ArduinoJson.h>
 
-#include "credentials.h" // Replace with your own file containing the WiFi and Telegram BOT credentials
+// Main credentials
+#include "credentials.h"
+// Used for testing purposes
+//#include "credentials_2.h"
 
 bool sendPhoto = false;
 
@@ -24,6 +27,8 @@ UniversalTelegramBot bot(BOTtoken, clientTCP);
 
 #define FLASH_LED_PIN 4
 bool flashState = LOW;
+
+int brightness_g = 255;
 
 //Checks for new messages every 1 second.
 int botRequestDelay = 1000;
@@ -93,6 +98,23 @@ void configInitCamera(){
   }
 }
 
+
+int get_brightness(const String &text, char delimiter) {
+  int brightness = 0;
+  if (text.indexOf(delimiter) != -1) {
+    int index = text.indexOf(delimiter);
+    int start = text.indexOf(" ", index);
+    int end = text.indexOf(" ", start + 1);
+    if (end == -1) {
+      end = text.length();
+    }
+    String brightnessStr = text.substring(start + 1, end);
+    brightness = brightnessStr.toInt();
+  }
+  return brightness;
+}
+
+
 void handleNewMessages(int numNewMessages) {
   Serial.print("Handle New Messages: ");
   Serial.println(numNewMessages);
@@ -124,6 +146,36 @@ void handleNewMessages(int numNewMessages) {
     if (text == "/photo" || text == "/p" || text == "p" || text == "P") {
       sendPhoto = true;
       Serial.println("New photo request");
+    }
+    if (text[0] == 'b' || text[0] == 'B') {
+      brightness_g = get_brightness(text, text[0]);
+      //brightness_g = constrain(brightness, 0, 50);
+      //analogWrite(FLASH_LED_PIN, brightness);
+      Serial.print("Set flash brightness to: ");
+      Serial.println(brightness_g);
+      bot.sendMessage(CHAT_ID, "Set flash brightness to: " + String(brightness_g), "");
+    }
+    if (text[0] == 'i' || text[0] == 'I')  {
+      brightness_g = get_brightness(text, text[0]);
+      //brightness_g = constrain(brightness, 0, 50);
+      //analogWrite(FLASH_LED_PIN, brightness);
+      Serial.print("Set flash brightness to: ");
+      Serial.println(brightness_g);
+      bot.sendMessage(CHAT_ID, "Set flash brightness to: " + String(brightness_g), "");
+      sendPhoto = true;
+      Serial.println("New photo request with brightness: " + String(brightness_g));
+    }
+
+    // Testing various things
+    if (text == "t" || text == "T") {
+      Serial.println("Testing now...");
+      bot.sendMessage(CHAT_ID, "Testing in progress...", "");
+      for (int b = 0; b < 50; b++) {
+        analogWrite(FLASH_LED_PIN, b);
+        delay(1000);
+        Serial.println(b);
+      }
+      analogWrite(FLASH_LED_PIN, 0);
     }
   }
 }
@@ -247,7 +299,8 @@ void loop() {
   if (sendPhoto) {
 
     // Turn on flash LED before taking a photo
-    digitalWrite(FLASH_LED_PIN, HIGH);
+    //digitalWrite(FLASH_LED_PIN, HIGH);
+    analogWrite(FLASH_LED_PIN, brightness_g);
 
     Serial.println("Preparing photo");
     sendPhotoTelegram(); 
@@ -255,20 +308,18 @@ void loop() {
     Serial.println("Photo sent");
     
     // Turn off flash LED after taking a photo
-    digitalWrite(FLASH_LED_PIN, LOW);
+    //digitalWrite(FLASH_LED_PIN, LOW);
+    analogWrite(FLASH_LED_PIN, 0);
   }
   
   if (millis() > lastTimeBotRan + botRequestDelay)  {
-    Serial.println("ADIRX: 1");
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
-    Serial.println("ADIRX: 2");
     while (numNewMessages) {
       Serial.println("got response");
       handleNewMessages(numNewMessages);
       numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
     lastTimeBotRan = millis();
-    Serial.println("ADIRX: 3");
   }
   delay(1000);
 }
