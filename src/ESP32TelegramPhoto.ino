@@ -266,19 +266,7 @@ String sendPhotoTelegram() {
   return getBody;
 }
 
-void setup(){
-  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
-  // Init Serial Monitor
-  Serial.begin(115200);
-
-  // Set LED Flash as output
-  pinMode(FLASH_LED_PIN, OUTPUT);
-  digitalWrite(FLASH_LED_PIN, flashState);
-
-  // Config and init the camera
-  configInitCamera();
-
-  // Connect to Wi-Fi
+void connect_to_wifi() {
   WiFi.mode(WIFI_STA);
   Serial.println();
   Serial.print("Connecting to ");
@@ -294,8 +282,37 @@ void setup(){
   Serial.println(WiFi.localIP()); 
 }
 
+void setup() {
+  WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
+  // Init Serial Monitor
+  Serial.begin(115200);
+
+  // Set LED Flash as output
+  pinMode(FLASH_LED_PIN, OUTPUT);
+  digitalWrite(FLASH_LED_PIN, flashState);
+
+  // Config and init the camera
+  configInitCamera();
+
+  // Connect to Wi-Fi
+  connect_to_wifi(); 
+}
+
+
 void loop() {
-  Serial.println("At the top of loop()");
+  Serial.println("Top of loop()");
+  
+  // Reconnect to WiFi if connection is lost
+  static unsigned long previousMillis = 0;
+  const unsigned long CHECK_WIFI_TIME_MSECS = 30000;
+  unsigned long currentMillis = millis();
+  // If WiFi is down, try reconnecting every CHECK_WIFI_TIME seconds
+  if ((WiFi.status() != WL_CONNECTED) && (currentMillis - previousMillis >= CHECK_WIFI_TIME_MSECS)) {
+    connect_to_wifi();
+    bot.sendMessage(CHAT_ID, "Reconnected to WiFi", "");
+    previousMillis = currentMillis;
+  }
+  
   if (sendPhoto) {
 
     // Turn on flash LED before taking a photo
@@ -321,5 +338,8 @@ void loop() {
     }
     lastTimeBotRan = millis();
   }
+
+  // The delay
+  Serial.println("Sleeping 1 second...");
   delay(1000);
 }
