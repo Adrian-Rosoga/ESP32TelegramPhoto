@@ -13,12 +13,28 @@ https://RandomNerdTutorials.com/telegram-esp32-cam-photo-arduino/
 #include "soc/rtc_cntl_reg.h"
 #include "esp_camera.h"
 #include <UniversalTelegramBot.h>
-#include <ArduinoJson.h>
+
+#include "ntp_time.h"
+
+/*
+Sample credential file:
+
+#include <StreamString.h>
+
+const char* ssid = "WIFI_SSID";
+const char* password = "WIFI_PASSWORD";
+
+// Telegram Bot Token (Get from Botfather)
+String BOTtoken = "8495705123:TODAYAlHyMt9mX0wmokAGjQB4LZDOKDEHc";
+
+// Use @myidbot to find out the chat ID of an individual or a group
+String CHAT_ID = "1112223334";
+*/
 
 // Main credentials
-#include "credentials.h"
+//#include "credentials.h"
 // Used for testing purposes
-//#include "credentials_2.h"
+#include "credentials_2.h"
 
 bool sendPhoto = false;
 
@@ -295,7 +311,10 @@ void setup() {
   configInitCamera();
 
   // Connect to Wi-Fi
-  connect_to_wifi(); 
+  connect_to_wifi();
+
+  // Initialize NTP and get the time
+  setup_time();
 }
 
 
@@ -311,6 +330,14 @@ void loop() {
     connect_to_wifi();
     bot.sendMessage(CHAT_ID, "Reconnected to WiFi", "");
     previousMillis = currentMillis;
+  }
+
+  static int current_hour = -1;
+  struct tm* currentDateTime = getDateTime();
+  if (currentDateTime->tm_hour != current_hour) {
+    Serial.println("======= ADIRX Sending photo automatically every hour =======");
+    sendPhoto = true;
+    current_hour = currentDateTime->tm_hour;
   }
   
   if (sendPhoto) {
