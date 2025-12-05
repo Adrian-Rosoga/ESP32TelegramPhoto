@@ -8,6 +8,7 @@ const int daylightOffset_sec = 3600;
 
 struct tm timeinfo;
 
+
 void setup_time() {
   configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
 }
@@ -16,10 +17,13 @@ void setup_time() {
 struct tm* getDateTime() {
   
   if(!getLocalTime(&timeinfo)) {
-    Serial.println("Failed to obtain time");
+    Serial.println("Error: Failed to obtain time");
     return &timeinfo;
   }
 
+  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+
+  /* 
   Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
   Serial.print("Day of week: ");
   Serial.println(&timeinfo, "%A");
@@ -46,6 +50,7 @@ struct tm* getDateTime() {
   strftime(timeWeekDay,10, "%A", &timeinfo);
   Serial.println(timeWeekDay);
   Serial.println();
+ */
 
   return &timeinfo;
 }

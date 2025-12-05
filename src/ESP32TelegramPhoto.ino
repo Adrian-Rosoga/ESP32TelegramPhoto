@@ -177,7 +177,7 @@ void handleNewMessages(int numNewMessages) {
       //analogWrite(FLASH_LED_PIN, brightness);
       Serial.print("Set flash brightness to: ");
       Serial.println(brightness_g);
-      bot.sendMessage(CHAT_ID, "Set flash brightness to: " + String(brightness_g), "");
+      bot.sendMessage(CHAT_ID, "Flash Brightness: " + String(brightness_g), "");
       sendPhoto = true;
       Serial.println("New photo request with brightness: " + String(brightness_g));
     }
@@ -313,6 +313,11 @@ void setup() {
   // Connect to Wi-Fi
   connect_to_wifi();
 
+  // TODO: My ESP #2 has 0C:B8:15:F5:A6:2C
+  // TODO: Need to be connected to Wifi to get the MAC address. Not ok.
+  Serial.print("\nDefault ESP32 MAC Address: ");
+  Serial.println(WiFi.macAddress());
+
   // Initialize NTP and get the time
   setup_time();
 }
@@ -333,11 +338,16 @@ void loop() {
   }
 
   static int current_hour = -1;
+  static int current_day = -1;
+  const int HOUR_TO_SEND_PHOTO = 6;
   struct tm* currentDateTime = getDateTime();
-  if (currentDateTime->tm_hour != current_hour) {
-    Serial.println("======= ADIRX Sending photo automatically every hour =======");
+  if (currentDateTime->tm_hour == HOUR_TO_SEND_PHOTO &&
+      currentDateTime->tm_yday != current_day) {
+    Serial.println("======= Sending the daily photo =======");
+    
+    brightness_g = 10;
     sendPhoto = true;
-    current_hour = currentDateTime->tm_hour;
+    current_day = currentDateTime->tm_yday;
   }
   
   if (sendPhoto) {
