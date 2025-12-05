@@ -19,27 +19,26 @@ https://RandomNerdTutorials.com/telegram-esp32-cam-photo-arduino/
 /*
 Sample credential file:
 
-#include <StreamString.h>
+#include <String.h>
 
 const char* ssid = "WIFI_SSID";
 const char* password = "WIFI_PASSWORD";
+const String CHAT_ID = "CHAT_ID";  // Use @myidbot to find out the chat ID of an individual or a group
 
-// Telegram Bot Token (Get from Botfather)
-String BOTtoken = "8495705123:TODAYAlHyMt9mX0wmokAGjQB4LZDOKDEHc";
-
-// Use @myidbot to find out the chat ID of an individual or a group
-String CHAT_ID = "1112223334";
+// Telegram Bot Token
+const String BOTtoken_1 = "0123456789:M0RVLDOTxWS5toiGTkgosVT-g9ecyfzMpQE";
+const String BOTtoken_2 = "0123456789:M0RVLDAlHyMt9mX0wmokAGjQB4LZDOKDEHc";
 */
 
-// Main credentials
-//#include "credentials.h"
-// Used for testing purposes
-#include "credentials_2.h"
+#include "credentials.h"    // WIFI and Telegram credentials
 
 bool sendPhoto = false;
 
 WiFiClientSecure clientTCP;
-UniversalTelegramBot bot(BOTtoken, clientTCP);
+String BOTtoken = "DummyBotToken";             // Will be set in setup()
+UniversalTelegramBot bot(BOTtoken, clientTCP); // Will be set in setup()
+
+int jpeg_quality = 10; // 10 was default, 0-63 lower number means higher quality
 
 #define FLASH_LED_PIN 4
 bool flashState = LOW;
@@ -95,13 +94,13 @@ void configInitCamera(){
   config.grab_mode = CAMERA_GRAB_LATEST;
 
   //init with high specs to pre-allocate larger buffers
-  if(psramFound()){
+  if(psramFound()) {
     config.frame_size = FRAMESIZE_UXGA;
-    config.jpeg_quality = 10;  //0-63 lower number means higher quality
+    config.jpeg_quality = jpeg_quality;  // 0-63 lower number means higher quality
     config.fb_count = 1;
   } else {
     config.frame_size = FRAMESIZE_SVGA;
-    config.jpeg_quality = 12;  //0-63 lower number means higher quality
+    config.jpeg_quality = 12;  // 0-63 lower number means higher quality
     config.fb_count = 1;
   }
   
@@ -112,6 +111,10 @@ void configInitCamera(){
     delay(1000);
     ESP.restart();
   }
+
+  // Take black and white pictures
+  sensor_t * s = esp_camera_sensor_get();
+  s->set_special_effect(s, 2); // 0 to 6 (0 - No Effect, 1 - Negative, 2 - Grayscale, 3 - Red Tint, 4 - Green Tint, 5 - Blue Tint, 6 - Sepia)
 }
 
 
@@ -202,14 +205,14 @@ String sendPhotoTelegram() {
   String getBody = "";
 
   //Dispose first picture because of bad quality
-  camera_fb_t * fb = NULL;
+  camera_fb_t *fb = NULL;
   fb = esp_camera_fb_get();
   esp_camera_fb_return(fb); // dispose the buffered image
   
   // Take a new photo
   fb = NULL;  
   fb = esp_camera_fb_get();  
-  if(!fb) {
+  if (!fb) {
     Serial.println("Camera capture failed");
     delay(1000);
     ESP.restart();
@@ -286,8 +289,8 @@ void connect_to_wifi() {
   WiFi.mode(WIFI_STA);
   Serial.println();
   Serial.print("Connecting to ");
-  Serial.println(ssid);
-  WiFi.begin(ssid, password);
+  Serial.println(SSID);
+  WiFi.begin(SSID, WIFI_PASSWORD);
   clientTCP.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
   while (WiFi.status() != WL_CONNECTED) {
     Serial.print(".");
@@ -297,6 +300,7 @@ void connect_to_wifi() {
   Serial.print("ESP32-CAM IP Address: ");
   Serial.println(WiFi.localIP()); 
 }
+
 
 void setup() {
   WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
@@ -313,10 +317,20 @@ void setup() {
   // Connect to Wi-Fi
   connect_to_wifi();
 
-  // TODO: My ESP #2 has 0C:B8:15:F5:A6:2C
   // TODO: Need to be connected to Wifi to get the MAC address. Not ok.
-  Serial.print("\nDefault ESP32 MAC Address: ");
-  Serial.println(WiFi.macAddress());
+  const String MAC_2 = "0C:B8:15:F5:A6:2C";
+  const String MAC = WiFi.macAddress();
+  Serial.print("\nESP32 MAC Address: ");
+  Serial.println(MAC);
+
+  if (MAC == MAC_2) {
+    Serial.println("Using BOTtoken_2");
+    BOTtoken = BOTtoken_2;
+  } else {
+    Serial.println("Using BOTtoken_1");
+    BOTtoken = BOTtoken_1;
+  }
+  bot.updateToken(BOTtoken);
 
   // Initialize NTP and get the time
   setup_time();
@@ -324,7 +338,7 @@ void setup() {
 
 
 void loop() {
-  Serial.println("Top of loop()");
+  //Serial.println("Top of loop()");
   
   // Reconnect to WiFi if connection is lost
   static unsigned long previousMillis = 0;
@@ -339,7 +353,7 @@ void loop() {
 
   static int current_hour = -1;
   static int current_day = -1;
-  const int HOUR_TO_SEND_PHOTO = 6;
+  const int HOUR_TO_SEND_PHOTO = 7;
   struct tm* currentDateTime = getDateTime();
   if (currentDateTime->tm_hour == HOUR_TO_SEND_PHOTO &&
       currentDateTime->tm_yday != current_day) {
