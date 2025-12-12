@@ -15,9 +15,10 @@ https://RandomNerdTutorials.com/telegram-esp32-cam-photo-arduino/
 #include <UniversalTelegramBot.h>
 
 #include "ntp_time.h"
+#include "credentials.h"    // WIFI and Telegram credentials - sample below
 
 /*
-Sample credential file:
+Sample credentials file:
 
 #include <String.h>
 
@@ -30,7 +31,6 @@ const String BOTtoken_1 = "0123456789:M0RVLDOTxWS5toiGTkgosVT-g9ecyfzMpQE";
 const String BOTtoken_2 = "0123456789:M0RVLDAlHyMt9mX0wmokAGjQB4LZDOKDEHc";
 */
 
-#include "credentials.h"    // WIFI and Telegram credentials
 
 bool sendPhoto = false;
 
@@ -43,10 +43,11 @@ int jpeg_quality = 10; // 10 was default, 0-63 lower number means higher quality
 #define FLASH_LED_PIN 4
 bool flashState = LOW;
 
-int brightness_g = 255;
+const int HOUR_TO_SEND_PHOTO = 6;
+int brightness_g = 255;   // Flash LED brightness (0-255) - This default is too bright
 
-//Checks for new messages every 1 second.
-int botRequestDelay = 1000;
+//Checks for new Telegram messages every 1 second.
+const int botRequestDelay = 1000;
 unsigned long lastTimeBotRan;
 
 //CAMERA_MODEL_AI_THINKER
@@ -134,6 +135,17 @@ int get_brightness(const String &text, char delimiter) {
 }
 
 
+String getDateTimeString() {
+  time_t now;
+  struct tm* timeinfo;
+  char buffer[40];
+  time(&now);
+  timeinfo = localtime(&now);
+  strftime(buffer, sizeof(buffer), "%A %Y-%m-%d %H:%M:%S", timeinfo);
+  return String(buffer);
+}
+
+
 void handleNewMessages(int numNewMessages) {
   Serial.print("Handle New Messages: ");
   Serial.println(numNewMessages);
@@ -180,7 +192,8 @@ void handleNewMessages(int numNewMessages) {
       //analogWrite(FLASH_LED_PIN, brightness);
       Serial.print("Set flash brightness to: ");
       Serial.println(brightness_g);
-      bot.sendMessage(CHAT_ID, "Flash Brightness: " + String(brightness_g), "");
+      //bot.sendMessage(CHAT_ID, "Flash Brightness: " + String(brightness_g), "");
+      bot.sendMessage(CHAT_ID, "Snap - " + getDateTimeString());
       sendPhoto = true;
       Serial.println("New photo request with brightness: " + String(brightness_g));
     }
@@ -199,18 +212,21 @@ void handleNewMessages(int numNewMessages) {
   }
 }
 
+
 String sendPhotoTelegram() {
   const char* myDomain = "api.telegram.org";
   String getAll = "";
   String getBody = "";
 
-  //Dispose first picture because of bad quality
   camera_fb_t *fb = NULL;
-  fb = esp_camera_fb_get();
-  esp_camera_fb_return(fb); // dispose the buffered image
-  
+
+  // TODO: Is that right? Dispose first picture because of bad quality
+  if (false) {
+    fb = esp_camera_fb_get();
+    esp_camera_fb_return(fb); // dispose the buffered image
+  }
+
   // Take a new photo
-  fb = NULL;  
   fb = esp_camera_fb_get();  
   if (!fb) {
     Serial.println("Camera capture failed");
@@ -224,8 +240,8 @@ String sendPhotoTelegram() {
   if (clientTCP.connect(myDomain, 443)) {
     Serial.println("Connection successful");
     
-    String head = "--RandomNerdTutorials\r\nContent-Disposition: form-data; name=\"chat_id\"; \r\n\r\n" + CHAT_ID + "\r\n--RandomNerdTutorials\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"esp32-cam.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n";
-    String tail = "\r\n--RandomNerdTutorials--\r\n";
+    String head = "--M0RVL\r\nContent-Disposition: form-data; name=\"chat_id\"; \r\n\r\n" + CHAT_ID + "\r\n--M0RVL\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"esp32-cam.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n";
+    String tail = "\r\n--M0RVL--\r\n";
 
     size_t imageLen = fb->len;
     size_t extraLen = head.length() + tail.length();
@@ -234,14 +250,14 @@ String sendPhotoTelegram() {
     clientTCP.println("POST /bot"+BOTtoken+"/sendPhoto HTTP/1.1");
     clientTCP.println("Host: " + String(myDomain));
     clientTCP.println("Content-Length: " + String(totalLen));
-    clientTCP.println("Content-Type: multipart/form-data; boundary=RandomNerdTutorials");
+    clientTCP.println("Content-Type: multipart/form-data; boundary=M0RVL");
     clientTCP.println();
     clientTCP.print(head);
   
     uint8_t *fbBuf = fb->buf;
     size_t fbLen = fb->len;
-    for (size_t n=0;n<fbLen;n=n+1024) {
-      if (n+1024<fbLen) {
+    for (size_t n = 0; n < fbLen; n = n + 1024) {
+      if (n+1024 < fbLen) {
         clientTCP.write(fbBuf, 1024);
         fbBuf += 1024;
       }
@@ -259,31 +275,32 @@ String sendPhotoTelegram() {
     long startTimer = millis();
     boolean state = false;
     
-    while ((startTimer + waitTime) > millis()){
+    while ((startTimer + waitTime) > millis()) {
       Serial.print(".");
       delay(100);      
       while (clientTCP.available()) {
         char c = clientTCP.read();
         if (state==true) getBody += String(c);        
         if (c == '\n') {
-          if (getAll.length()==0) state=true; 
+          if (getAll.length() == 0) state = true; 
           getAll = "";
         } 
         else if (c != '\r')
           getAll += String(c);
         startTimer = millis();
       }
-      if (getBody.length()>0) break;
+      if (getBody.length() > 0) break;
     }
     clientTCP.stop();
     Serial.println(getBody);
   }
   else {
-    getBody="Connected to api.telegram.org failed.";
-    Serial.println("Connected to api.telegram.org failed.");
+    getBody = "ERROR: Connection to api.telegram.org failed.";
+    Serial.println("ERROR: Connection to api.telegram.org failed.");
   }
   return getBody;
 }
+
 
 void connect_to_wifi() {
   WiFi.mode(WIFI_STA);
@@ -297,7 +314,7 @@ void connect_to_wifi() {
     delay(500);
   }
   Serial.println();
-  Serial.print("ESP32-CAM IP Address: ");
+  Serial.print("ESP32 IP: ");
   Serial.println(WiFi.localIP()); 
 }
 
@@ -320,7 +337,7 @@ void setup() {
   // TODO: Need to be connected to Wifi to get the MAC address. Not ok.
   const String MAC_2 = "0C:B8:15:F5:A6:2C";
   const String MAC = WiFi.macAddress();
-  Serial.print("\nESP32 MAC Address: ");
+  Serial.print("ESP32 MAC: ");
   Serial.println(MAC);
 
   if (MAC == MAC_2) {
@@ -353,19 +370,19 @@ void loop() {
 
   static int current_hour = -1;
   static int current_day = -1;
-  const int HOUR_TO_SEND_PHOTO = 7;
   struct tm* currentDateTime = getDateTime();
   if (currentDateTime->tm_hour == HOUR_TO_SEND_PHOTO &&
       currentDateTime->tm_yday != current_day) {
     Serial.println("======= Sending the daily photo =======");
     
-    brightness_g = 10;
+    brightness_g = 10;  // TODO: make configurable
     sendPhoto = true;
     current_day = currentDateTime->tm_yday;
+
+    bot.sendMessage(CHAT_ID, "Daily Snap - " + getDateTimeString());
   }
   
   if (sendPhoto) {
-
     // Turn on flash LED before taking a photo
     //digitalWrite(FLASH_LED_PIN, HIGH);
     analogWrite(FLASH_LED_PIN, brightness_g);
@@ -390,7 +407,7 @@ void loop() {
     lastTimeBotRan = millis();
   }
 
-  // The delay
-  Serial.println("Sleeping 1 second...");
+  // Loop delay
+  //Serial.println("Sleeping 1 second...");
   delay(1000);
 }

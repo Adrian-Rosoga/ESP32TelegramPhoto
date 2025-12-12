@@ -21,10 +21,8 @@ struct tm* getDateTime() {
     return &timeinfo;
   }
 
-  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
-
   /* 
-  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");
+  Serial.println(&timeinfo, "%A, %B %d %Y %H:%M:%S");   // Friday, December 12 2025 05:47:17
   Serial.print("Day of week: ");
   Serial.println(&timeinfo, "%A");
   Serial.print("Month: ");
