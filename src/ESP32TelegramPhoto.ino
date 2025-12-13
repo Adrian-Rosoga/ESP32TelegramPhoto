@@ -17,6 +17,11 @@ https://RandomNerdTutorials.com/telegram-esp32-cam-photo-arduino/
 #include "ntp_time.h"
 #include "credentials.h"    // WIFI and Telegram credentials - sample below
 
+// Debug logging control
+#define ENABLE_DEBUG 1
+#define LOG(...) do { if (ENABLE_DEBUG) { Serial.print(__VA_ARGS__); } } while(0)
+#define LOGLN(...) do { if (ENABLE_DEBUG) { Serial.println(__VA_ARGS__); } } while(0)
+
 /*
 Sample credentials file:
 
@@ -229,8 +234,8 @@ void handleNewMessages(int numNewMessages) {
 
 String sendPhotoTelegram() {
   const char* myDomain = "api.telegram.org";
-  String getAll = "";
   String getBody = "";
+  getBody.reserve(1024);
 
   camera_fb_t *fb = NULL;
 
@@ -260,19 +265,25 @@ String sendPhotoTelegram() {
   if (clientTCP.connect(myDomain, 443)) {
     Serial.println("Connection successful");
     
-    String head = "--M0RVL\r\nContent-Disposition: form-data; name=\"chat_id\"; \r\n\r\n" + CHAT_ID + "\r\n--M0RVL\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"esp32-cam.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n";
-    String tail = "\r\n--M0RVL--\r\n";
+    // Prepare multipart pieces (use const parts to avoid String concatenation)
+    const char headPart1[] = "--M0RVL\r\nContent-Disposition: form-data; name=\"chat_id\"; \r\n\r\n";
+    const char headPart2[] = "\r\n--M0RVL\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"esp32-cam.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n";
+    const char tailArr[] = "\r\n--M0RVL--\r\n";
 
     size_t imageLen = fb->len;
-    size_t extraLen = head.length() + tail.length();
+    size_t extraLen = strlen(headPart1) + CHAT_ID.length() + strlen(headPart2) + strlen(tailArr);
     size_t totalLen = imageLen + extraLen;
-  
+
     clientTCP.println("POST /bot"+BOTtoken+"/sendPhoto HTTP/1.1");
     clientTCP.println("Host: " + String(myDomain));
     clientTCP.println("Content-Length: " + String(totalLen));
     clientTCP.println("Content-Type: multipart/form-data; boundary=M0RVL");
     clientTCP.println();
-    clientTCP.print(head);
+
+    // send multipart head
+    clientTCP.print(headPart1);
+    clientTCP.print(CHAT_ID);
+    clientTCP.print(headPart2);
   
     // Send image in fixed-size chunks (avoid missing final chunk)
     size_t fbLen = fb->len;
@@ -283,7 +294,7 @@ String sendPhotoTelegram() {
       sent += chunk;
     }
     
-    clientTCP.print(tail);
+    clientTCP.print(tailArr);
     
     esp_camera_fb_return(fb);
     
@@ -292,9 +303,13 @@ String sendPhotoTelegram() {
     // Read response in larger chunks into getBody (safer than char-by-char)
     while (millis() - startTimer < (unsigned long)waitTime) {
       while (clientTCP.available()) {
-        String chunk = clientTCP.readStringUntil('\n');
-        getBody += chunk + "\n";
-        startTimer = millis();
+        char buf[128];
+        size_t len = clientTCP.readBytes(buf, sizeof(buf)-1);
+        if (len > 0) {
+          buf[len] = '\0';
+          getBody += String(buf);
+          startTimer = millis();
+        }
       }
       if (getBody.length() > 0) break;
       delay(10);
@@ -314,11 +329,23 @@ void connect_to_wifi() {
   WiFi.mode(WIFI_STA);
   Serial.print("\nConnecting to WIFI ");
   Serial.println(SSID);
-  WiFi.begin(SSID, WIFI_PASSWORD);
   clientTCP.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
-  while (WiFi.status() != WL_CONNECTED) {
+  WiFi.begin(SSID, WIFI_PASSWORD);
+
+  // Exponential backoff reconnect attempts
+  const int maxAttempts = 10;
+  int attempt = 0;
+  while (WiFi.status() != WL_CONNECTED && attempt < maxAttempts) {
+    unsigned long waitMs = 500UL * (1UL << min(attempt, 6)); // cap shift
     Serial.print(".");
-    delay(500);
+    delay(waitMs);
+    attempt++;
+  }
+  if (WiFi.status() != WL_CONNECTED) {
+    Serial.println();
+    Serial.println("Failed to connect to WiFi after attempts");
+    // leave function and allow caller to decide (loop() will retry periodically)
+    return;
   }
   Serial.println();
   Serial.print("ESP32 IP: ");
@@ -342,6 +369,14 @@ void setup() {
 
   // Connect to Wi-Fi
   connect_to_wifi();
+
+  // Basic runtime credentials check to avoid running without credentials
+  if (String(CHAT_ID).length() == 0 || BOTtoken_1.length() < 10) {
+    Serial.println("Missing credentials in credentials.h - please provide SSID, WIFI_PASSWORD, CHAT_ID and BOT tokens.");
+    while (true) {
+      delay(1000);
+    }
+  }
 
   // TODO: Need to be connected to Wifi to get the MAC address. Not ok.
   const String MAC_2 = "0C:B8:15:F5:A6:2C";

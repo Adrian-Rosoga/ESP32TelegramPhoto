@@ -256,3 +256,94 @@ Would you like me to:
 - Open a PR / commit these changes with a descriptive message?
 
 Made changes.
+
+User: Implement the rest of the suggestions
+
+GitHub Copilot: I'll scan the repo for `UniversalTelegramBot` usage and plan edits to replace manual multipart POST with the library binary send, plus reduce String allocations and add credential guard.
+
+Searched for text `sendPhotoByBinary|sendPhoto|UniversalTelegramBot|sendPhotoTelegram`, 20 results
+
+Searched for files matching `**/UniversalTelegramBot/**`, no matches
+
+Searched for regex `UniversalTelegramBot.cpp|UniversalTelegramBot.h`, 1 result
+
+Read [](file:///c%3A/src/PlatformIO/Projects/ESP32TelegramPhoto/include/README)
+
+Read [](file:///c%3A/src/PlatformIO/Projects/ESP32TelegramPhoto/src/credentials.h)
+
+Searched for text `get_brightness(`, 8 results
+
+I'll update ESP32TelegramPhoto.ino to (1) reduce String allocations in `sendPhotoTelegram()` by streaming multipart headers, (2) reserve response buffer and remove unused `getAll`, (3) add logging macros, (4) implement exponential backoff in `connect_to_wifi()`, and (5) add a runtime credentials check in `setup()`. Applying changes now.
+
+Using "Apply Patch"
+
+
+```
+
+```
+
+
+Using "Apply Patch"
+
+
+```
+
+```
+
+
+Using "Apply Patch"
+
+
+```
+
+```
+
+
+Using "Apply Patch"
+
+
+```
+
+```
+
+
+Ran terminal command: C:\Users\Adi\.platformio\penv\Scripts\platformio.exe run
+
+Read [](file:///c%3A/src/PlatformIO/Projects/ESP32TelegramPhoto/src/ESP32TelegramPhoto.ino#250-250), lines 250 to 305
+
+Using "Apply Patch"
+
+
+```
+
+```
+
+
+Ran terminal command: C:\Users\Adi\.platformio\penv\Scripts\platformio.exe run
+
+Done — I implemented the remaining improvements and verified the project builds.
+
+Changes made
+- Reworked `sendPhotoTelegram()` to:
+  - Stream multipart headers directly (avoid building large Strings).
+  - Compute `Content-Length` from const parts + `CHAT_ID` length.
+  - Send the image in fixed-size chunks (no dropped final chunk).
+  - Read HTTP response into a fixed buffer (reduced heap churn) and reserved `getBody`.
+- Added debug logging macros (`ENABLE_DEBUG`, `LOG`, `LOGLN`).
+- Added exponential backoff to `connect_to_wifi()` instead of a blocking infinite loop.
+- Added a runtime credentials check in `setup()` that halts if required credentials look missing.
+
+Build
+- Ran `platformio run` — build succeeded.
+
+Notes and next recommendations
+- You still have manual multipart POST code. The `UniversalTelegramBot` library includes a binary photo API which would simplify this logic and remove manual TLS/HTTP handling — I can convert to that next if you want.
+- Consider removing live credentials from credentials.h and instead use a non-committed `credentials_local.h` or PlatformIO build flags to avoid leaking tokens.
+- We reduced `String` churn but there are still `String` uses elsewhere (e.g., message handling). If you want, I can change `sendPhotoTelegram()` to use `UniversalTelegramBot::sendPhotoByBinary()` and further eliminate remaining Strings.
+
+Would you like me to:
+- Convert `sendPhotoTelegram()` to use `UniversalTelegramBot` binary-photo API now?
+- Replace credential file with a template and move real credentials out of the repo?
+- Run a quick runtime test on the device (if connected) to validate photo send?
+
+Made changes.
