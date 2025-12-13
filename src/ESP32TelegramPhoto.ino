@@ -7,6 +7,7 @@ https://RandomNerdTutorials.com/telegram-esp32-cam-photo-arduino/
 */
 
 #include <Arduino.h>
+#include <string>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
 #include "soc/soc.h"
@@ -43,8 +44,8 @@ const String BOTtoken_2 = "0123456789:M0RVLDAlHyMt9mX0wmokAGjQB4LZDOKDEHc";
 const int HOUR_TO_SEND_PHOTO = 5; // 24-hour format
 bool sendPhoto = false;
 WiFiClientSecure clientTCP;
-String BOTtoken = "DummyBotToken";             // Will be set in setup()
-UniversalTelegramBot bot(BOTtoken, clientTCP); // Will be set in setup()
+std::string BOTtoken = "DummyBotToken";             // Will be set in setup()
+UniversalTelegramBot bot("", clientTCP); // token updated in setup()
 int jpeg_quality = 10; // 10 was default, 0-63 lower number means higher quality
 bool flashState = LOW;
 int brightness_g = 255;   // Flash LED brightness (0-255) - This default is too bright
@@ -139,29 +140,38 @@ void configInitCamera() {
 }
 
 
-int get_brightness(const String &text, char delimiter=' ') {
+int get_brightness(const std::string &text, char delimiter=' ') {
   // Robust brightness parsing: accept forms like "b10", "b 10", "b=10"
   int brightness = -1;
   if (text.length() < 2) return brightness;
   // take everything after the first char
-  String num = text.substring(1);
-  num.trim();
+  std::string num = text.substr(1);
+  // trim whitespace
+  auto trim = [](std::string &s) {
+    size_t start = s.find_first_not_of(" \t\r\n");
+    size_t end = s.find_last_not_of(" \t\r\n");
+    if (start == std::string::npos) { s.clear(); return; }
+    s = s.substr(start, end - start + 1);
+  };
+  trim(num);
   // support b=10 or b:10
-  if (num.startsWith("=") || num.startsWith(":")) num = num.substring(1);
-  num.trim();
-  if (num.length() > 0) brightness = num.toInt();
+  if (!num.empty() && (num[0] == '=' || num[0] == ':')) num = num.substr(1);
+  trim(num);
+  if (!num.empty()) {
+    brightness = atoi(num.c_str());
+  }
   return brightness;
 }
 
 
-String getDateTimeString() {
+std::string getDateTimeString() {
   time_t now;
   struct tm* timeinfo;
   char buffer[40];
   time(&now);
   timeinfo = localtime(&now);
   strftime(buffer, sizeof(buffer), "%A, %Y-%m-%d %H:%M:%S", timeinfo);
-  return String(buffer);
+  return std::string(buffer);
 }
 
 
@@ -170,23 +180,21 @@ void handleNewMessages(int numNewMessages) {
   Serial.println(numNewMessages);
 
   for (int i = 0; i < numNewMessages; i++) {
-    String chat_id = String(bot.messages[i].chat_id);
-    if (chat_id != CHAT_ID){
-      bot.sendMessage(chat_id, "Unauthorized user");
+    std::string chat_id = std::string(bot.messages[i].chat_id.c_str());
+    if (chat_id != std::string(CHAT_ID)){
+      bot.sendMessage(bot.messages[i].chat_id, "Unauthorized user");
       continue;
     }
-    
+
     // Print the received message
-    String text = bot.messages[i].text;
-    Serial.println(text);
-    
-    String from_name = bot.messages[i].from_name;
+    std::string text = std::string(bot.messages[i].text.c_str());
+    Serial.println(bot.messages[i].text);
+
+    std::string from_name = std::string(bot.messages[i].from_name.c_str());
     if (text == "/start") {
-      String welcome = "Welcome, " + from_name + "!\n";
-      welcome += "Use the following commands to interact with the ESP32-CAM\n";
-      welcome += "/photo or /p or p or P: takes a new photo\n";
-      welcome += "/flash or /f or f or F: toggles flash LED\n";
-      bot.sendMessage(CHAT_ID, welcome);
+      char welcomeBuf[192];
+      snprintf(welcomeBuf, sizeof(welcomeBuf), "Welcome, %s!\nUse the following commands to interact with the ESP32-CAM\n/photo or /p or p or P: takes a new photo\n/flash or /f or f or F: toggles flash LED\n", from_name.c_str());
+      bot.sendMessage(CHAT_ID, welcomeBuf);
     }
     if (text == "/flash" || text == "/f" || text == "f" || text == "F") {
       flashState = !flashState;
@@ -197,24 +205,24 @@ void handleNewMessages(int numNewMessages) {
       sendPhoto = true;
       Serial.println("New photo request");
     }
-    if (text[0] == 'b' || text[0] == 'B') {
+    if (!text.empty() && (text[0] == 'b' || text[0] == 'B')) {
       brightness_g = get_brightness(text);
-      //brightness_g = constrain(brightness, 0, 50);
-      //analogWrite(FLASH_LED_PIN, brightness);
       Serial.print("Set flash brightness to: ");
       Serial.println(brightness_g);
-      bot.sendMessage(CHAT_ID, "Set flash brightness to: " + String(brightness_g));
+      char msgBuf[64];
+      snprintf(msgBuf, sizeof(msgBuf), "Set flash brightness to: %d", brightness_g);
+      bot.sendMessage(CHAT_ID, msgBuf);
     }
-    if (text[0] == 'i' || text[0] == 'I')  {
+    if (!text.empty() && (text[0] == 'i' || text[0] == 'I'))  {
       brightness_g = get_brightness(text);
-      //brightness_g = constrain(brightness, 0, 50);
-      //analogWrite(FLASH_LED_PIN, brightness);
       Serial.print("Set flash brightness to: ");
       Serial.println(brightness_g);
-      //bot.sendMessage(CHAT_ID, "Flash Brightness: " + String(brightness_g), "");
-      bot.sendMessage(CHAT_ID, "Snap - " + getDateTimeString());
+      char snapBuf[128];
+      snprintf(snapBuf, sizeof(snapBuf), "Snap - %s", getDateTimeString().c_str());
+      bot.sendMessage(CHAT_ID, snapBuf);
       sendPhoto = true;
-      Serial.println("New photo request with brightness: " + String(brightness_g));
+      Serial.print("New photo request with brightness: ");
+      Serial.println(brightness_g);
     }
 
     // Testing various things
@@ -232,10 +240,13 @@ void handleNewMessages(int numNewMessages) {
 }
 
 
-String sendPhotoTelegram() {
+std::string sendPhotoTelegram() {
   const char* myDomain = "api.telegram.org";
-  String getBody = "";
-  getBody.reserve(1024);
+  // Response buffer to avoid Arduino String heap growth
+  const size_t RESPONSE_BUF_SIZE = 2048;
+  char responseBuf[RESPONSE_BUF_SIZE];
+  size_t respLen = 0;
+  responseBuf[0] = '\0';
 
   camera_fb_t *fb = NULL;
 
@@ -260,7 +271,8 @@ String sendPhotoTelegram() {
     return "Camera capture failed";
   }
   
-  Serial.println("Connect to " + String(myDomain));
+  Serial.print("Connect to ");
+  Serial.println(myDomain);
 
   if (clientTCP.connect(myDomain, 443)) {
     Serial.println("Connection successful");
@@ -271,12 +283,17 @@ String sendPhotoTelegram() {
     const char tailArr[] = "\r\n--M0RVL--\r\n";
 
     size_t imageLen = fb->len;
-    size_t extraLen = strlen(headPart1) + CHAT_ID.length() + strlen(headPart2) + strlen(tailArr);
+    size_t extraLen = strlen(headPart1) + strlen(CHAT_ID) + strlen(headPart2) + strlen(tailArr);
     size_t totalLen = imageLen + extraLen;
-
-    clientTCP.println("POST /bot"+BOTtoken+"/sendPhoto HTTP/1.1");
-    clientTCP.println("Host: " + String(myDomain));
-    clientTCP.println("Content-Length: " + String(totalLen));
+    // Stream POST request line and headers without creating temporary Strings
+    clientTCP.print("POST /bot");
+    clientTCP.print(BOTtoken.c_str());
+    clientTCP.println("/sendPhoto HTTP/1.1");
+    clientTCP.print("Host: ");
+    clientTCP.println(myDomain);
+    char hdrBuf[64];
+    snprintf(hdrBuf, sizeof(hdrBuf), "Content-Length: %u", (unsigned)totalLen);
+    clientTCP.println(hdrBuf);
     clientTCP.println("Content-Type: multipart/form-data; boundary=M0RVL");
     clientTCP.println();
 
@@ -300,28 +317,34 @@ String sendPhotoTelegram() {
     
     int waitTime = 10000;   // timeout waiting for HTTP response
     unsigned long startTimer = millis();
-    // Read response in larger chunks into getBody (safer than char-by-char)
+    // Read response in larger chunks into a preallocated buffer
     while (millis() - startTimer < (unsigned long)waitTime) {
       while (clientTCP.available()) {
         char buf[128];
         size_t len = clientTCP.readBytes(buf, sizeof(buf)-1);
         if (len > 0) {
-          buf[len] = '\0';
-          getBody += String(buf);
+          // copy bounded
+          size_t canCopy = (RESPONSE_BUF_SIZE - 1 - respLen) < len ? (RESPONSE_BUF_SIZE - 1 - respLen) : len;
+          if (canCopy > 0) {
+            memcpy(responseBuf + respLen, buf, canCopy);
+            respLen += canCopy;
+            responseBuf[respLen] = '\0';
+          }
           startTimer = millis();
         }
       }
-      if (getBody.length() > 0) break;
+      if (respLen > 0) break;
       delay(10);
     }
     clientTCP.stop();
-    Serial.println(getBody);
+    Serial.println(responseBuf);
   }
   else {
-    getBody = "ERROR: Connection to api.telegram.org failed.";
-    Serial.println("ERROR: Connection to api.telegram.org failed.");
+    const char* err = "ERROR: Connection to api.telegram.org failed.";
+    Serial.println(err);
+    return std::string(err);
   }
-  return getBody;
+  return std::string(responseBuf);
 }
 
 
@@ -371,7 +394,7 @@ void setup() {
   connect_to_wifi();
 
   // Basic runtime credentials check to avoid running without credentials
-  if (String(CHAT_ID).length() == 0 || BOTtoken_1.length() < 10) {
+  if (strlen(CHAT_ID) == 0 || strlen(BOTtoken_1) < 10) {
     Serial.println("Missing credentials in credentials.h - please provide SSID, WIFI_PASSWORD, CHAT_ID and BOT tokens.");
     while (true) {
       delay(1000);
@@ -379,19 +402,19 @@ void setup() {
   }
 
   // TODO: Need to be connected to Wifi to get the MAC address. Not ok.
-  const String MAC_2 = "0C:B8:15:F5:A6:2C";
-  const String MAC = WiFi.macAddress();
+  const char* MAC_2 = "0C:B8:15:F5:A6:2C";
+  std::string MAC = std::string(WiFi.macAddress().c_str());
   Serial.print("ESP32 MAC: ");
-  Serial.println(MAC);
+  Serial.println(MAC.c_str());
 
-  if (MAC == MAC_2) {
+  if (MAC == std::string(MAC_2)) {
     Serial.println("Using BOTtoken_2");
-    BOTtoken = BOTtoken_2;
+    BOTtoken = std::string(BOTtoken_2);
   } else {
     Serial.println("Using BOTtoken_1");
-    BOTtoken = BOTtoken_1;
+    BOTtoken = std::string(BOTtoken_1);
   }
-  bot.updateToken(BOTtoken);
+  bot.updateToken(String(BOTtoken.c_str()));
 
   // Initialize NTP and get the time
   setup_time();
@@ -423,7 +446,9 @@ void loop() {
     sendPhoto = true;
     current_day = currentDateTime->tm_yday;
 
-    bot.sendMessage(CHAT_ID, "Daily Snap - " + getDateTimeString());
+    char dailyBuf[128];
+    snprintf(dailyBuf, sizeof(dailyBuf), "Daily Snap - %s", getDateTimeString().c_str());
+    bot.sendMessage(CHAT_ID, dailyBuf);
   }
   
   if (sendPhoto) {
