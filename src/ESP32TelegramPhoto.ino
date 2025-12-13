@@ -53,6 +53,40 @@ int brightness_g = 255;   // Flash LED brightness (0-255) - This default is too 
 const int botRequestDelay = 1000;
 unsigned long lastTimeBotRan;
 
+// LEDC (ESP32 PWM) configuration for flash
+const int LEDC_CHANNEL = 0;
+const int LEDC_FREQ = 5000;
+const int LEDC_RESOLUTION = 8; // bits (0-255)
+
+// Buffers and callbacks for UniversalTelegramBot binary upload
+static const uint8_t* ut_send_buf = nullptr;
+static size_t ut_send_len = 0;
+static size_t ut_send_pos = 0;
+static size_t ut_next_chunk_len = 0;
+
+bool ut_more_data_available() {
+  return ut_send_pos < ut_send_len;
+}
+
+byte ut_get_next_byte() {
+  if (ut_send_pos < ut_send_len) return ut_send_buf[ut_send_pos++];
+  return 0;
+}
+
+byte* ut_get_next_buffer() {
+  if (ut_send_pos >= ut_send_len) return nullptr;
+  size_t rem = ut_send_len - ut_send_pos;
+  size_t chunk = rem > 1024 ? 1024 : rem;
+  ut_next_chunk_len = chunk;
+  return (byte*)(ut_send_buf + ut_send_pos);
+}
+
+int ut_get_next_buffer_len() {
+  size_t v = ut_next_chunk_len;
+  ut_send_pos += v;
+  return (int)v;
+}
+
 // CAMERA_MODEL_AI_THINKER
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
@@ -233,20 +267,16 @@ void handleNewMessages(int numNewMessages) {
 
 
 String sendPhotoTelegram() {
-  const char* myDomain = "api.telegram.org";
-  String getBody = "";
-  getBody.reserve(1024);
-
+  // Use UniversalTelegramBot to send the captured frame as binary (simpler and safer)
   camera_fb_t *fb = NULL;
-
-  // Dispose a possibly stale frame (improves first-frame quality)
+  // Dispose possibly stale frame
   fb = esp_camera_fb_get();
   if (fb) {
     esp_camera_fb_return(fb);
     fb = NULL;
   }
 
-  // Take a new photo with a few retries
+  // Capture new frame with retries
   int captureTries = 0;
   while (captureTries < 3) {
     fb = esp_camera_fb_get();
@@ -259,69 +289,30 @@ String sendPhotoTelegram() {
     Serial.println("Camera capture failed after retries");
     return "Camera capture failed";
   }
-  
-  Serial.println("Connect to " + String(myDomain));
 
-  if (clientTCP.connect(myDomain, 443)) {
-    Serial.println("Connection successful");
-    
-    // Prepare multipart pieces (use const parts to avoid String concatenation)
-    const char headPart1[] = "--M0RVL\r\nContent-Disposition: form-data; name=\"chat_id\"; \r\n\r\n";
-    const char headPart2[] = "\r\n--M0RVL\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"esp32-cam.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n";
-    const char tailArr[] = "\r\n--M0RVL--\r\n";
+  // Prepare global/static callbacks for library streaming
+  static const uint8_t* _send_buf = nullptr;
+  static size_t _send_len = 0;
+  static size_t _send_pos = 0;
+  static size_t _next_chunk_len = 0;
 
-    size_t imageLen = fb->len;
-    size_t extraLen = strlen(headPart1) + CHAT_ID.length() + strlen(headPart2) + strlen(tailArr);
-    size_t totalLen = imageLen + extraLen;
+  auto moreDataAvailable = []() -> bool { return _send_pos < _send_len; };
+  // Initialize buffer pointers for callbacks
+  ut_send_buf = fb->buf;
+  ut_send_len = fb->len;
+  ut_send_pos = 0;
+  ut_next_chunk_len = 0;
 
-    clientTCP.println("POST /bot"+BOTtoken+"/sendPhoto HTTP/1.1");
-    clientTCP.println("Host: " + String(myDomain));
-    clientTCP.println("Content-Length: " + String(totalLen));
-    clientTCP.println("Content-Type: multipart/form-data; boundary=M0RVL");
-    clientTCP.println();
+  Serial.println("Sending photo via UniversalTelegramBot (streamed)");
+  String response = bot.sendPhotoByBinary(CHAT_ID, String("image/jpeg"), (int)ut_send_len,
+                                          ut_more_data_available,
+                                          (GetNextByte)nullptr,
+                                          ut_get_next_buffer,
+                                          ut_get_next_buffer_len);
 
-    // send multipart head
-    clientTCP.print(headPart1);
-    clientTCP.print(CHAT_ID);
-    clientTCP.print(headPart2);
-  
-    // Send image in fixed-size chunks (avoid missing final chunk)
-    size_t fbLen = fb->len;
-    size_t sent = 0;
-    while (sent < fbLen) {
-      size_t chunk = (fbLen - sent) > 1024 ? 1024 : (fbLen - sent);
-      clientTCP.write(fb->buf + sent, chunk);
-      sent += chunk;
-    }
-    
-    clientTCP.print(tailArr);
-    
-    esp_camera_fb_return(fb);
-    
-    int waitTime = 10000;   // timeout waiting for HTTP response
-    unsigned long startTimer = millis();
-    // Read response in larger chunks into getBody (safer than char-by-char)
-    while (millis() - startTimer < (unsigned long)waitTime) {
-      while (clientTCP.available()) {
-        char buf[128];
-        size_t len = clientTCP.readBytes(buf, sizeof(buf)-1);
-        if (len > 0) {
-          buf[len] = '\0';
-          getBody += String(buf);
-          startTimer = millis();
-        }
-      }
-      if (getBody.length() > 0) break;
-      delay(10);
-    }
-    clientTCP.stop();
-    Serial.println(getBody);
-  }
-  else {
-    getBody = "ERROR: Connection to api.telegram.org failed.";
-    Serial.println("ERROR: Connection to api.telegram.org failed.");
-  }
-  return getBody;
+  esp_camera_fb_return(fb);
+  Serial.println(response);
+  return response;
 }
 
 
