@@ -104,8 +104,17 @@ void configInitCamera() {
   
   // camera init
   esp_err_t err = esp_camera_init(&config);
+  // Retry a few times before rebooting
+  int tryCount = 0;
+  while (err != ESP_OK && tryCount < 3) {
+    Serial.printf("Camera init failed with error 0x%x, retrying (%d)\n", err, tryCount + 1);
+    delay(1000);
+    err = esp_camera_init(&config);
+    tryCount++;
+  }
   if (err != ESP_OK) {
-    Serial.printf("Camera init failed with error 0x%x", err);
+    Serial.printf("Camera init failed after retries: 0x%x\n", err);
+    // As a last resort restart
     delay(1000);
     ESP.restart();
   }
@@ -125,18 +134,17 @@ void configInitCamera() {
 }
 
 
-int get_brightness(const String &text, char delimiter) {
-  int brightness = 0;
-  if (text.indexOf(delimiter) != -1) {
-    int index = text.indexOf(delimiter);
-    int start = text.indexOf(" ", index);
-    int end = text.indexOf(" ", start + 1);
-    if (end == -1) {
-      end = text.length();
-    }
-    String brightnessStr = text.substring(start + 1, end);
-    brightness = brightnessStr.toInt();
-  }
+int get_brightness(const String &text, char delimiter=' ') {
+  // Robust brightness parsing: accept forms like "b10", "b 10", "b=10"
+  int brightness = -1;
+  if (text.length() < 2) return brightness;
+  // take everything after the first char
+  String num = text.substring(1);
+  num.trim();
+  // support b=10 or b:10
+  if (num.startsWith("=") || num.startsWith(":")) num = num.substring(1);
+  num.trim();
+  if (num.length() > 0) brightness = num.toInt();
   return brightness;
 }
 
@@ -185,7 +193,7 @@ void handleNewMessages(int numNewMessages) {
       Serial.println("New photo request");
     }
     if (text[0] == 'b' || text[0] == 'B') {
-      brightness_g = get_brightness(text, text[0]);
+      brightness_g = get_brightness(text);
       //brightness_g = constrain(brightness, 0, 50);
       //analogWrite(FLASH_LED_PIN, brightness);
       Serial.print("Set flash brightness to: ");
@@ -193,7 +201,7 @@ void handleNewMessages(int numNewMessages) {
       bot.sendMessage(CHAT_ID, "Set flash brightness to: " + String(brightness_g));
     }
     if (text[0] == 'i' || text[0] == 'I')  {
-      brightness_g = get_brightness(text, text[0]);
+      brightness_g = get_brightness(text);
       //brightness_g = constrain(brightness, 0, 50);
       //analogWrite(FLASH_LED_PIN, brightness);
       Serial.print("Set flash brightness to: ");
@@ -226,20 +234,26 @@ String sendPhotoTelegram() {
 
   camera_fb_t *fb = NULL;
 
-  // TODO: Is that right? Dispose first picture because of bad quality
-  if (true) {
-    fb = esp_camera_fb_get();
-    esp_camera_fb_return(fb); // dispose the buffered image
+  // Dispose a possibly stale frame (improves first-frame quality)
+  fb = esp_camera_fb_get();
+  if (fb) {
+    esp_camera_fb_return(fb);
+    fb = NULL;
   }
 
-  // Take a new photo
-  fb = esp_camera_fb_get();  
+  // Take a new photo with a few retries
+  int captureTries = 0;
+  while (captureTries < 3) {
+    fb = esp_camera_fb_get();
+    if (fb) break;
+    Serial.println("Camera capture failed, retrying...");
+    delay(200);
+    captureTries++;
+  }
   if (!fb) {
-    Serial.println("Camera capture failed");
-    delay(1000);
-    ESP.restart();
+    Serial.println("Camera capture failed after retries");
     return "Camera capture failed";
-  }  
+  }
   
   Serial.println("Connect to " + String(myDomain));
 
@@ -260,42 +274,30 @@ String sendPhotoTelegram() {
     clientTCP.println();
     clientTCP.print(head);
   
-    uint8_t *fbBuf = fb->buf;
+    // Send image in fixed-size chunks (avoid missing final chunk)
     size_t fbLen = fb->len;
-    for (size_t n = 0; n < fbLen; n = n + 1024) {
-      if (n + 1024 < fbLen) {
-        clientTCP.write(fbBuf, 1024);
-        fbBuf += 1024;
-      }
-      else if (fbLen % 1024 > 0) {
-        size_t remainder = fbLen % 1024;
-        clientTCP.write(fbBuf, remainder);
-      }
-    }  
+    size_t sent = 0;
+    while (sent < fbLen) {
+      size_t chunk = (fbLen - sent) > 1024 ? 1024 : (fbLen - sent);
+      clientTCP.write(fb->buf + sent, chunk);
+      sent += chunk;
+    }
     
     clientTCP.print(tail);
     
     esp_camera_fb_return(fb);
     
-    int waitTime = 10000;   // TODO: timeout 10 seconds. Timeout for what?
-    long startTimer = millis();
-    boolean state = false;
-    
-    while ((startTimer + waitTime) > millis()) {
-      Serial.print(".");
-      delay(100);      
+    int waitTime = 10000;   // timeout waiting for HTTP response
+    unsigned long startTimer = millis();
+    // Read response in larger chunks into getBody (safer than char-by-char)
+    while (millis() - startTimer < (unsigned long)waitTime) {
       while (clientTCP.available()) {
-        char c = clientTCP.read();    // TODO: Really, read one char at a time?
-        if (state == true) getBody += String(c);        
-        if (c == '\n') {
-          if (getAll.length() == 0) state = true; 
-          getAll = "";
-        } 
-        else if (c != '\r')
-          getAll += String(c);
+        String chunk = clientTCP.readStringUntil('\n');
+        getBody += chunk + "\n";
         startTimer = millis();
       }
       if (getBody.length() > 0) break;
+      delay(10);
     }
     clientTCP.stop();
     Serial.println(getBody);
