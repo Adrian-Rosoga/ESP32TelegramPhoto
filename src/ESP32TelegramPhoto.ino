@@ -26,37 +26,34 @@ const char* ssid = "WIFI_SSID";
 const char* password = "WIFI_PASSWORD";
 const String CHAT_ID = "CHAT_ID";  // Use @myidbot to find out the chat ID of an individual or a group
 
+
 // Telegram Bot Token
 const String BOTtoken_1 = "0123456789:M0RVLDOTxWS5toiGTkgosVT-g9ecyfzMpQE";
 const String BOTtoken_2 = "0123456789:M0RVLDAlHyMt9mX0wmokAGjQB4LZDOKDEHc";
 */
 
+#define FLASH_LED_PIN 4
 
+// Main configs
+const int HOUR_TO_SEND_PHOTO = 5; // 24-hour format
 bool sendPhoto = false;
-
 WiFiClientSecure clientTCP;
 String BOTtoken = "DummyBotToken";             // Will be set in setup()
 UniversalTelegramBot bot(BOTtoken, clientTCP); // Will be set in setup()
-
 int jpeg_quality = 10; // 10 was default, 0-63 lower number means higher quality
-
-#define FLASH_LED_PIN 4
 bool flashState = LOW;
-
-const int HOUR_TO_SEND_PHOTO = 6;
 int brightness_g = 255;   // Flash LED brightness (0-255) - This default is too bright
 
-//Checks for new Telegram messages every 1 second.
+// Checks for new Telegram messages every 1 second.
 const int botRequestDelay = 1000;
 unsigned long lastTimeBotRan;
 
-//CAMERA_MODEL_AI_THINKER
+// CAMERA_MODEL_AI_THINKER
 #define PWDN_GPIO_NUM     32
 #define RESET_GPIO_NUM    -1
 #define XCLK_GPIO_NUM      0
 #define SIOD_GPIO_NUM     26
 #define SIOC_GPIO_NUM     27
-
 #define Y9_GPIO_NUM       35
 #define Y8_GPIO_NUM       34
 #define Y7_GPIO_NUM       39
@@ -70,7 +67,7 @@ unsigned long lastTimeBotRan;
 #define PCLK_GPIO_NUM     22
 
 
-void configInitCamera(){
+void configInitCamera() {
   camera_config_t config;
   config.ledc_channel = LEDC_CHANNEL_0;
   config.ledc_timer = LEDC_TIMER_0;
@@ -94,8 +91,8 @@ void configInitCamera(){
   config.pixel_format = PIXFORMAT_JPEG;
   config.grab_mode = CAMERA_GRAB_LATEST;
 
-  //init with high specs to pre-allocate larger buffers
-  if(psramFound()) {
+  // init with high specs to pre-allocate larger buffers
+  if (psramFound()) {
     config.frame_size = FRAMESIZE_UXGA;
     config.jpeg_quality = jpeg_quality;  // 0-63 lower number means higher quality
     config.fb_count = 1;
@@ -114,8 +111,17 @@ void configInitCamera(){
   }
 
   // Take black and white pictures
-  sensor_t * s = esp_camera_sensor_get();
-  s->set_special_effect(s, 2); // 0 to 6 (0 - No Effect, 1 - Negative, 2 - Grayscale, 3 - Red Tint, 4 - Green Tint, 5 - Blue Tint, 6 - Sepia)
+  sensor_t *s = esp_camera_sensor_get();
+  /* Set special effect to grayscale 
+  0 - No Effect
+  1 - Negative
+  2 - Grayscale
+  3 - Red Tint
+  4 - Green Tint
+  5 - Blue Tint
+  6 - Sepia
+  */
+  s->set_special_effect(s, 2);
 }
 
 
@@ -141,19 +147,19 @@ String getDateTimeString() {
   char buffer[40];
   time(&now);
   timeinfo = localtime(&now);
-  strftime(buffer, sizeof(buffer), "%A %Y-%m-%d %H:%M:%S", timeinfo);
+  strftime(buffer, sizeof(buffer), "%A, %Y-%m-%d %H:%M:%S", timeinfo);
   return String(buffer);
 }
 
 
 void handleNewMessages(int numNewMessages) {
-  Serial.print("Handle New Messages: ");
+  Serial.print("Handle new messages: ");
   Serial.println(numNewMessages);
 
   for (int i = 0; i < numNewMessages; i++) {
     String chat_id = String(bot.messages[i].chat_id);
     if (chat_id != CHAT_ID){
-      bot.sendMessage(chat_id, "Unauthorized user", "");
+      bot.sendMessage(chat_id, "Unauthorized user");
       continue;
     }
     
@@ -167,7 +173,7 @@ void handleNewMessages(int numNewMessages) {
       welcome += "Use the following commands to interact with the ESP32-CAM\n";
       welcome += "/photo or /p or p or P: takes a new photo\n";
       welcome += "/flash or /f or f or F: toggles flash LED\n";
-      bot.sendMessage(CHAT_ID, welcome, "");
+      bot.sendMessage(CHAT_ID, welcome);
     }
     if (text == "/flash" || text == "/f" || text == "f" || text == "F") {
       flashState = !flashState;
@@ -184,7 +190,7 @@ void handleNewMessages(int numNewMessages) {
       //analogWrite(FLASH_LED_PIN, brightness);
       Serial.print("Set flash brightness to: ");
       Serial.println(brightness_g);
-      bot.sendMessage(CHAT_ID, "Set flash brightness to: " + String(brightness_g), "");
+      bot.sendMessage(CHAT_ID, "Set flash brightness to: " + String(brightness_g));
     }
     if (text[0] == 'i' || text[0] == 'I')  {
       brightness_g = get_brightness(text, text[0]);
@@ -201,7 +207,7 @@ void handleNewMessages(int numNewMessages) {
     // Testing various things
     if (text == "t" || text == "T") {
       Serial.println("Testing now...");
-      bot.sendMessage(CHAT_ID, "Testing in progress...", "");
+      bot.sendMessage(CHAT_ID, "Testing in progress...");
       for (int b = 0; b < 50; b++) {
         analogWrite(FLASH_LED_PIN, b);
         delay(1000);
@@ -221,7 +227,7 @@ String sendPhotoTelegram() {
   camera_fb_t *fb = NULL;
 
   // TODO: Is that right? Dispose first picture because of bad quality
-  if (false) {
+  if (true) {
     fb = esp_camera_fb_get();
     esp_camera_fb_return(fb); // dispose the buffered image
   }
@@ -257,12 +263,12 @@ String sendPhotoTelegram() {
     uint8_t *fbBuf = fb->buf;
     size_t fbLen = fb->len;
     for (size_t n = 0; n < fbLen; n = n + 1024) {
-      if (n+1024 < fbLen) {
+      if (n + 1024 < fbLen) {
         clientTCP.write(fbBuf, 1024);
         fbBuf += 1024;
       }
-      else if (fbLen%1024>0) {
-        size_t remainder = fbLen%1024;
+      else if (fbLen % 1024 > 0) {
+        size_t remainder = fbLen % 1024;
         clientTCP.write(fbBuf, remainder);
       }
     }  
@@ -271,7 +277,7 @@ String sendPhotoTelegram() {
     
     esp_camera_fb_return(fb);
     
-    int waitTime = 10000;   // timeout 10 seconds
+    int waitTime = 10000;   // TODO: timeout 10 seconds. Timeout for what?
     long startTimer = millis();
     boolean state = false;
     
@@ -279,8 +285,8 @@ String sendPhotoTelegram() {
       Serial.print(".");
       delay(100);      
       while (clientTCP.available()) {
-        char c = clientTCP.read();
-        if (state==true) getBody += String(c);        
+        char c = clientTCP.read();    // TODO: Really, read one char at a time?
+        if (state == true) getBody += String(c);        
         if (c == '\n') {
           if (getAll.length() == 0) state = true; 
           getAll = "";
@@ -304,8 +310,7 @@ String sendPhotoTelegram() {
 
 void connect_to_wifi() {
   WiFi.mode(WIFI_STA);
-  Serial.println();
-  Serial.print("Connecting to ");
+  Serial.print("\nConnecting to WIFI ");
   Serial.println(SSID);
   WiFi.begin(SSID, WIFI_PASSWORD);
   clientTCP.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
@@ -330,6 +335,8 @@ void setup() {
 
   // Config and init the camera
   configInitCamera();
+
+  Serial.print("\nStarting up...");
 
   // Connect to Wi-Fi
   connect_to_wifi();
@@ -364,7 +371,7 @@ void loop() {
   // If WiFi is down, try reconnecting every CHECK_WIFI_TIME seconds
   if ((WiFi.status() != WL_CONNECTED) && (currentMillis - previousMillis >= CHECK_WIFI_TIME_MSECS)) {
     connect_to_wifi();
-    bot.sendMessage(CHAT_ID, "Reconnected to WiFi", "");
+    bot.sendMessage(CHAT_ID, "Reconnected to WiFi");
     previousMillis = currentMillis;
   }
 
