@@ -388,7 +388,7 @@ void setup() {
   // Config and init the camera
   configInitCamera();
 
-  Serial.print("\nStarting up...");
+  Serial.print("\n\n=== ESP32 Starting up...");
 
   // Connect to Wi-Fi
   connect_to_wifi();
@@ -418,6 +418,12 @@ void setup() {
 
   // Initialize NTP and get the time
   setup_time();
+
+  // Send startup message after 10 seconds delay
+  delay(10000);
+  char dailyBuf[128];
+  snprintf(dailyBuf, sizeof(dailyBuf), "Hello World! ESP32 up! %s", getDateTimeString().c_str());
+  bot.sendMessage(CHAT_ID, dailyBuf);
 }
 
 
