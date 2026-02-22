@@ -10,6 +10,7 @@ https://RandomNerdTutorials.com/telegram-esp32-cam-photo-arduino/
 #include <string>
 #include <WiFi.h>
 #include <WiFiClientSecure.h>
+#include <ArduinoOTA.h>
 #include "soc/soc.h"
 #include "soc/rtc_cntl_reg.h"
 #include "esp_camera.h"
@@ -218,7 +219,7 @@ void handleNewMessages(int numNewMessages) {
       Serial.print("Set flash brightness to: ");
       Serial.println(brightness_g);
       char snapBuf[128];
-      snprintf(snapBuf, sizeof(snapBuf), "Snap - %s", getDateTimeString().c_str());
+      snprintf(snapBuf, sizeof(snapBuf), "Snap Request at %s", getDateTimeString().c_str());
       bot.sendMessage(CHAT_ID, snapBuf);
       sendPhoto = true;
       Serial.print("New photo request with brightness: ");
@@ -348,7 +349,7 @@ std::string sendPhotoTelegram() {
 }
 
 
-void connect_to_wifi() {
+IPAddress connect_to_wifi() {
   WiFi.mode(WIFI_STA);
   Serial.print("\nConnecting to WIFI ");
   Serial.println(SSID);
@@ -368,11 +369,13 @@ void connect_to_wifi() {
     Serial.println();
     Serial.println("Failed to connect to WiFi after attempts");
     // leave function and allow caller to decide (loop() will retry periodically)
-    return;
+    return IPAddress(0,0,0,0);
   }
   Serial.println();
   Serial.print("ESP32 IP: ");
-  Serial.println(WiFi.localIP()); 
+  Serial.println(WiFi.localIP());
+
+  return WiFi.localIP();
 }
 
 
@@ -391,7 +394,39 @@ void setup() {
   Serial.print("\n\n=== ESP32 Starting up...");
 
   // Connect to Wi-Fi
-  connect_to_wifi();
+  IPAddress ip_address = connect_to_wifi();
+
+  // Initialize OTA updates
+  {
+    String mac = WiFi.macAddress();
+    mac.replace(":", "");
+    size_t startIdx = mac.length() > 6 ? mac.length() - 6 : 0;
+    String host = "esp32cam-" + mac.substring(startIdx);
+    ArduinoOTA.setHostname(host.c_str());
+    if (strlen(OTA_PASSWORD) > 0) {
+      ArduinoOTA.setPassword(OTA_PASSWORD);
+    }
+    ArduinoOTA.onStart([]() {
+      Serial.println("Begin OTA");
+    });
+    ArduinoOTA.onEnd([]() {
+      Serial.println("End OTA");
+    });
+    ArduinoOTA.onProgress([](unsigned int progress, unsigned int total) {
+      Serial.printf("OTA Progress: %u%%\r", (progress / (total / 100)));
+    });
+    ArduinoOTA.onError([](ota_error_t err) {
+      Serial.printf("OTA Error[%u]: ", err);
+      if (err == OTA_AUTH_ERROR) Serial.println("Auth Failed");
+      else if (err == OTA_BEGIN_ERROR) Serial.println("Begin Failed");
+      else if (err == OTA_CONNECT_ERROR) Serial.println("Connect Failed");
+      else if (err == OTA_RECEIVE_ERROR) Serial.println("Receive Failed");
+      else if (err == OTA_END_ERROR) Serial.println("End Failed");
+    });
+    ArduinoOTA.begin();
+    Serial.print("OTA ready. Hostname: ");
+    Serial.println(host);
+  }
 
   // Basic runtime credentials check to avoid running without credentials
   if (strlen(CHAT_ID) == 0 || strlen(BOTtoken_1) < 10) {
@@ -421,14 +456,16 @@ void setup() {
 
   // Send startup message after 10 seconds delay
   delay(10000);
-  char dailyBuf[128];
-  snprintf(dailyBuf, sizeof(dailyBuf), "Hello World! ESP32 up! %s", getDateTimeString().c_str());
+  char dailyBuf[256];
+  snprintf(dailyBuf, sizeof(dailyBuf), "ESP32 up!\n\nReal OTA in Action!\n\nHostname=%s\nMAC=%s\nIP=%s\n\n%s", ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address.toString().c_str(), getDateTimeString().c_str());
   bot.sendMessage(CHAT_ID, dailyBuf);
 }
 
 
 void loop() {
   //Serial.println("Top of loop()");
+  // Handle OTA events
+  ArduinoOTA.handle();
   
   // Reconnect to WiFi if connection is lost
   static unsigned long previousMillis = 0;
@@ -441,20 +478,45 @@ void loop() {
     previousMillis = currentMillis;
   }
 
-  static int current_hour = -1;
-  static int current_day = -1;
-  struct tm* currentDateTime = getDateTime();
-  if (currentDateTime->tm_hour == HOUR_TO_SEND_PHOTO &&
-      currentDateTime->tm_yday != current_day) {
-    Serial.println("======= Sending the daily photo =======");
-    
-    brightness_g = 10;  // TODO: make configurable
-    sendPhoto = true;
-    current_day = currentDateTime->tm_yday;
+  static int counter = 0;
 
-    char dailyBuf[128];
-    snprintf(dailyBuf, sizeof(dailyBuf), "Daily Snap - %s", getDateTimeString().c_str());
-    bot.sendMessage(CHAT_ID, dailyBuf);
+  if (false) {
+    //
+    // Water Softener
+    // Daily photo at a specific hour of the day (e.g., 5 AM)
+    //
+    static int current_hour = -1;
+    static int current_day = -1;
+    struct tm* currentDateTime = getDateTime();
+    if (currentDateTime->tm_hour == HOUR_TO_SEND_PHOTO &&
+        currentDateTime->tm_yday != current_day) {
+      Serial.println("======= Sending the daily photo =======");
+      
+      brightness_g = 10;  // TODO: make configurable
+      sendPhoto = true;
+      current_day = currentDateTime->tm_yday;
+
+      char dailyBuf[128];
+      snprintf(dailyBuf, sizeof(dailyBuf), "Daily Snap - %s", getDateTimeString().c_str());
+      bot.sendMessage(CHAT_ID, dailyBuf);
+    }
+  } else {
+    //
+    // Testing: periodic photo every N minutes
+    // Water pressure heating system 
+    //
+    int minutes = 5;
+    if (counter % (minutes * 60) == 0) {
+      Serial.println("======= Sending photo =======");
+      
+      brightness_g = 40;  // TODO: make configurable
+      sendPhoto = true;
+
+      char dailyBuf[128];
+      snprintf(dailyBuf, sizeof(dailyBuf), "Snap every %d minutes - %s", minutes, getDateTimeString().c_str());
+      bot.sendMessage(CHAT_ID, dailyBuf);
+    }
+    counter++;
   }
   
   if (sendPhoto) {
@@ -462,10 +524,10 @@ void loop() {
     //digitalWrite(FLASH_LED_PIN, HIGH);
     analogWrite(FLASH_LED_PIN, brightness_g);
 
-    Serial.println("Preparing photo");
+    Serial.println("Preparing photo...");
     sendPhotoTelegram(); 
     sendPhoto = false;
-    Serial.println("Photo sent");
+    Serial.println("Photo sent!");
     
     // Turn off flash LED after taking a photo
     //digitalWrite(FLASH_LED_PIN, LOW);
@@ -475,14 +537,14 @@ void loop() {
   if (millis() > lastTimeBotRan + botRequestDelay)  {
     int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     while (numNewMessages) {
-      Serial.println("got response");
+      Serial.println("Got response");
       handleNewMessages(numNewMessages);
       numNewMessages = bot.getUpdates(bot.last_message_received + 1);
     }
     lastTimeBotRan = millis();
   }
 
-  // Loop delay
+  // Loop delay 1 second
   //Serial.println("Sleeping 1 second...");
   delay(1000);
 }
