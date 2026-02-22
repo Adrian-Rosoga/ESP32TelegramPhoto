@@ -27,16 +27,19 @@ https://RandomNerdTutorials.com/telegram-esp32-cam-photo-arduino/
 /*
 Sample credentials file:
 
-#include <String.h>
+// WiFi credentials
+const char* SSID = "XXX";
+const char* WIFI_PASSWORD = "XXX";
 
-const char* ssid = "WIFI_SSID";
-const char* password = "WIFI_PASSWORD";
-const String CHAT_ID = "CHAT_ID";  // Use @myidbot to find out the chat ID of an individual or a group
+// Use chat ID from @myidbot (C-string to avoid Arduino String heap usage)
+const char* CHAT_ID = "XXX";
 
+// Telegram Bot Tokens (C-strings)
+const char* BOTtoken_1 = "XXX";
+const char* BOTtoken_2 = "XXX";
 
-// Telegram Bot Token
-const String BOTtoken_1 = "0123456789:M0RVLDOTxWS5toiGTkgosVT-g9ecyfzMpQE";
-const String BOTtoken_2 = "0123456789:M0RVLDAlHyMt9mX0wmokAGjQB4LZDOKDEHc";
+// Optional OTA password (leave empty for no password). Set a short password for security.
+const char* OTA_PASSWORD = "";
 */
 
 #define FLASH_LED_PIN 4
