@@ -20,6 +20,10 @@ board_build.partitions = min_spiffs.csv
 The partition file to which to point is, i.e.:
 C:\Users\Adi\.platformio\packages\framework-arduinoespressif32\tools\partitions\min_spiffs.csv
 
+Note:
+Possibly the following set as admin in PowerShell is necessary:
+PS C:\WINDOWS\system32> New-NetFirewallRule -DisplayName "Allow Python PlatformIO" -Direction Inbound -Program "$env:USERPROFILE\.platformio\penv\Scripts\python.exe" -Action Allow -Profile Private
+
 1) Build the environments - esp32cam and esp32cam_ota
 
 2) Ensure the IPs of the ESP32 and the computer from where one uploads are correct

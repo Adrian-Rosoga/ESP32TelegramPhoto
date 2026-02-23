@@ -42,6 +42,8 @@ const char* BOTtoken_2 = "XXX";
 const char* OTA_PASSWORD = "";
 */
 
+std::string __version__ = "1.1";
+
 #define FLASH_LED_PIN 4
 
 // Main configs
@@ -222,7 +224,7 @@ void handleNewMessages(int numNewMessages) {
       Serial.print("Set flash brightness to: ");
       Serial.println(brightness_g);
       char snapBuf[128];
-      snprintf(snapBuf, sizeof(snapBuf), "Snap Request at %s", getDateTimeString().c_str());
+      snprintf(snapBuf, sizeof(snapBuf), "Snap Request at %s (flash %d)", getDateTimeString().c_str(), brightness_g);
       bot.sendMessage(CHAT_ID, snapBuf);
       sendPhoto = true;
       Serial.print("New photo request with brightness: ");
@@ -441,6 +443,7 @@ void setup() {
 
   // TODO: Need to be connected to Wifi to get the MAC address. Not ok.
   const char* MAC_2 = "0C:B8:15:F5:A6:2C";
+  const char* MAC_1 = "0C:B8:15:F7:53:38";
   std::string MAC = std::string(WiFi.macAddress().c_str());
   Serial.print("ESP32 MAC: ");
   Serial.println(MAC.c_str());
@@ -448,9 +451,11 @@ void setup() {
   if (MAC == std::string(MAC_2)) {
     Serial.println("Using BOTtoken_2");
     BOTtoken = std::string(BOTtoken_2);
-  } else {
+  } else if (MAC == std::string(MAC_1)) {
     Serial.println("Using BOTtoken_1");
     BOTtoken = std::string(BOTtoken_1);
+  } else {
+    Serial.printf("ERROR: Unsupported MAC address %s", MAC.c_str());
   }
   bot.updateToken(String(BOTtoken.c_str()));
 
@@ -460,7 +465,7 @@ void setup() {
   // Send startup message after 10 seconds delay
   delay(10000);
   char dailyBuf[256];
-  snprintf(dailyBuf, sizeof(dailyBuf), "ESP32 up!\n\nReal OTA in Action!\n\nHostname=%s\nMAC=%s\nIP=%s\n\n%s", ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address.toString().c_str(), getDateTimeString().c_str());
+  snprintf(dailyBuf, sizeof(dailyBuf), "ESP32 v%s up!\n\nOTA enabled!\n\nHostname=%s\nMAC=%s\nIP=%s\n\n%s",  __version__.c_str(), ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address.toString().c_str(), getDateTimeString().c_str());
   bot.sendMessage(CHAT_ID, dailyBuf);
 }
 
@@ -483,7 +488,7 @@ void loop() {
 
   static int counter = 0;
 
-  if (false) {
+  if (BOTtoken == std::string(BOTtoken_1)) {
     //
     // Water Softener
     // Daily photo at a specific hour of the day (e.g., 5 AM)
@@ -500,10 +505,10 @@ void loop() {
       current_day = currentDateTime->tm_yday;
 
       char dailyBuf[128];
-      snprintf(dailyBuf, sizeof(dailyBuf), "Daily Snap - %s", getDateTimeString().c_str());
+      snprintf(dailyBuf, sizeof(dailyBuf), "Daily Snap (flash %d) - %s", brightness_g, getDateTimeString().c_str());
       bot.sendMessage(CHAT_ID, dailyBuf);
     }
-  } else {
+  } else if (BOTtoken == std::string(BOTtoken_2)) {
     //
     // Testing: periodic photo every N minutes
     // Water pressure heating system 
@@ -516,9 +521,12 @@ void loop() {
       sendPhoto = true;
 
       char dailyBuf[128];
-      snprintf(dailyBuf, sizeof(dailyBuf), "Snap every %d minutes - %s", minutes, getDateTimeString().c_str());
+      snprintf(dailyBuf, sizeof(dailyBuf), "Snap every %d minutes (flash %d) - %s", minutes, brightness_g, getDateTimeString().c_str());
       bot.sendMessage(CHAT_ID, dailyBuf);
+    } else {
+      Serial.printf("ERROR - unexpected BOTtoken value: %s\n", BOTtoken.c_str());
     }
+
     counter++;
   }
   
