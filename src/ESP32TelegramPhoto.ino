@@ -42,7 +42,7 @@ const char* BOTtoken_2 = "XXX";
 const char* OTA_PASSWORD = "";
 */
 
-std::string __version__ = "1.2";
+std::string __version__ = "1.4 - 2026-02-23";
 
 #define FLASH_LED_PIN 4
 
@@ -52,9 +52,14 @@ bool sendPhoto = false;
 WiFiClientSecure clientTCP;
 std::string BOTtoken = "DummyBotToken";             // Will be set in setup()
 UniversalTelegramBot bot("", clientTCP); // token updated in setup()
-int jpeg_quality = 10; // 10 was default, 0-63 lower number means higher quality
+
+const int JPEG_QUALITY_DEFAULT = 10; // TODO: Taking pictures ends in failure if quality is set to 0!
+int jpeg_quality_g = JPEG_QUALITY_DEFAULT; // 10 was the original default, values from 0 to 63, LOWER number means HIGHER quality
+
 bool flashState = LOW;
 int brightness_g = 255;   // Flash LED brightness (0-255) - This default is too bright
+
+int minutes_g = 5;        // Minutes interval for automatic photo sending, default is 5 minutes
 
 // Checks for new Telegram messages every 1 second.
 const int botRequestDelay = 1000;
@@ -106,7 +111,7 @@ void configInitCamera() {
     // init with high specs to pre-allocate larger buffers
     if (psramFound()) {
         config.frame_size = FRAMESIZE_UXGA;
-        config.jpeg_quality = jpeg_quality;  // 0-63 lower number means higher quality
+        config.jpeg_quality = jpeg_quality_g;  // 0-63 lower number means higher quality
         config.fb_count = 1;
     } else {
         config.frame_size = FRAMESIZE_SVGA;
@@ -197,20 +202,24 @@ void handleNewMessages(int numNewMessages) {
         Serial.println(bot.messages[i].text);
 
         std::string from_name = std::string(bot.messages[i].from_name.c_str());
+
         if (text == "/start") {
             char welcomeBuf[192];
             snprintf(welcomeBuf, sizeof(welcomeBuf), "Welcome, %s!\nUse the following commands to interact with the ESP32-CAM\n/photo or /p or p or P: takes a new photo\n/flash or /f or f or F: toggles flash LED\n", from_name.c_str());
             bot.sendMessage(CHAT_ID, welcomeBuf);
         }
+
         if (text == "/flash" || text == "/f" || text == "f" || text == "F") {
             flashState = !flashState;
             digitalWrite(FLASH_LED_PIN, flashState);
             Serial.println("Change flash LED state");
         }
+
         if (text == "/photo" || text == "/p" || text == "p" || text == "P") {
             sendPhoto = true;
             Serial.println("New photo request");
         }
+
         if (!text.empty() && (text[0] == 'b' || text[0] == 'B')) {
             brightness_g = get_brightness(text);
             Serial.print("Set flash brightness to: ");
@@ -219,16 +228,40 @@ void handleNewMessages(int numNewMessages) {
             snprintf(msgBuf, sizeof(msgBuf), "Set flash brightness to: %d", brightness_g);
             bot.sendMessage(CHAT_ID, msgBuf);
         }
+
+        if (!text.empty() && (text[0] == 'm' || text[0] == 'M')) {
+            minutes_g = get_brightness(text);
+            Serial.print("Set minutes interval to: ");
+            Serial.println(minutes_g);
+            char msgBuf[64];
+            snprintf(msgBuf, sizeof(msgBuf), "Set minutes interval to: %d", minutes_g);
+            bot.sendMessage(CHAT_ID, msgBuf);
+        }
+
         if (!text.empty() && (text[0] == 'i' || text[0] == 'I'))  {
             brightness_g = get_brightness(text);
             Serial.print("Set flash brightness to: ");
             Serial.println(brightness_g);
             char snapBuf[128];
-            snprintf(snapBuf, sizeof(snapBuf), "Snap Request at %s (flash %d)", getDateTimeString().c_str(), brightness_g);
+            snprintf(snapBuf, sizeof(snapBuf), "Snap Request %s (flash %d)", getDateTimeString().c_str(), brightness_g);
             bot.sendMessage(CHAT_ID, snapBuf);
             sendPhoto = true;
             Serial.print("New photo request with brightness: ");
             Serial.println(brightness_g);
+        }
+
+        // TODO: Here I tried to add a command to set the JPEG quality, but it seems that reconfiguring the camera make it go in an unstable loop in which the ESP32 keeps restarting.
+        if (!text.empty() && (text[0] == 'q' || text[0] == 'Q')) {
+            jpeg_quality_g = get_brightness(text);
+            Serial.print("Set JPEG quality to: ");
+            Serial.println(jpeg_quality_g);
+
+            // TODO: configInitCamera() causes infinite loop, ESP32 restarts. Need to investigate if it's possible to reconfigure the camera on the fly or if it requires a restart. For now, just set the variable and use it on next reboot.
+            //configInitCamera(); // Re-init camera with new JPEG quality
+            
+            char msgBuf[64];
+            snprintf(msgBuf, sizeof(msgBuf), "Set JPEG quality to: %d. It does not take effect though", jpeg_quality_g);
+            bot.sendMessage(CHAT_ID, msgBuf);
         }
 
         // Testing various things
@@ -356,7 +389,10 @@ std::string sendPhotoTelegram() {
         Serial.println(err);
         return std::string(err);
     }
-    return std::string(responseBuf);
+    
+    // ADIRX
+    //return std::string(responseBuf);
+    return std::string("");
 }
 
 
@@ -447,21 +483,27 @@ void setup() {
         }
     }
 
-    // TODO: Need to be connected to Wifi to get the MAC address. Not ok.
-    const char* MAC_2 = "0C:B8:15:F5:A6:2C";
+    // TODO: Need to be connected to Wifi to get the MAC address. Not ok. Refactor to get MAC address without WiFi connection or move this block after WiFi connection.
     const char* MAC_1 = "0C:B8:15:F7:53:38";
-    std::string MAC = std::string(WiFi.macAddress().c_str());
+    const char* MAC_2 = "0C:B8:15:F5:A6:2C";
+    const std::string MAC = std::string(WiFi.macAddress().c_str());
     Serial.print("ESP32 MAC: ");
     Serial.println(MAC.c_str());
 
     if (MAC == std::string(MAC_2)) {
+
         Serial.println("Using BOTtoken_2");
         BOTtoken = std::string(BOTtoken_2);
+        brightness_g = 40;  // TODO: Hardcoded value for boiler
+
     } else if (MAC == std::string(MAC_1)) {
+        
         Serial.println("Using BOTtoken_1");
         BOTtoken = std::string(BOTtoken_1);
+        brightness_g = 10;  // TODO: Hardcoded value for water softener
+
     } else {
-        Serial.printf("ERROR: Unsupported MAC address %s", MAC.c_str());
+        Serial.printf("ERROR: Unsupported ESP with MAC address %s", MAC.c_str());
     }
     bot.updateToken(String(BOTtoken.c_str()));
 
@@ -471,7 +513,7 @@ void setup() {
     // Send startup message after 10 seconds delay
     delay(10000);
     char dailyBuf[256];
-    snprintf(dailyBuf, sizeof(dailyBuf), "ESP32 v%s up!\n\nOTA enabled!\n\nHostname=%s\nMAC=%s\nIP=%s\n\n%s",  __version__.c_str(), ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address.toString().c_str(), getDateTimeString().c_str());
+    snprintf(dailyBuf, sizeof(dailyBuf), "ESP32 v%s up!\n\nOTA enabled!\n\nHostname=%s\nMAC=%s\nIP=%s\nJPEG Quality=%d\n\n%s",  __version__.c_str(), ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address.toString().c_str(), jpeg_quality_g, getDateTimeString().c_str());
     bot.sendMessage(CHAT_ID, dailyBuf);
 }
 
@@ -496,8 +538,8 @@ void loop() {
 
     if (BOTtoken == std::string(BOTtoken_1)) {
         //
-        // Water Softener
         // Daily photo at a specific hour of the day (e.g., 5 AM)
+        // Water Softener
         //
         static int current_hour = -1;
         static int current_day = -1;
@@ -506,7 +548,6 @@ void loop() {
                 currentDateTime->tm_yday != current_day) {
             Serial.println("======= Sending the daily photo =======");
             
-            brightness_g = 10;  // TODO: make configurable
             sendPhoto = true;
             current_day = currentDateTime->tm_yday;
 
@@ -519,35 +560,36 @@ void loop() {
         // Testing: periodic photo every N minutes
         // Water pressure heating system 
         //
-        int minutes = 5;
-        if (counter % (minutes * 60) == 0) {
+        if (counter % (minutes_g * 60) == 0) {
             Serial.println("======= Sending photo =======");
             
-            brightness_g = 40;  // TODO: make configurable
             sendPhoto = true;
 
             char dailyBuf[128];
-            snprintf(dailyBuf, sizeof(dailyBuf), "Snap every %d minutes (flash %d) - %s", minutes, brightness_g, getDateTimeString().c_str());
+            snprintf(dailyBuf, sizeof(dailyBuf), "Snap every %d minutes (flash %d) - %s", minutes_g, brightness_g, getDateTimeString().c_str());
             bot.sendMessage(CHAT_ID, dailyBuf);
-        } else {
-            Serial.printf("ERROR - unexpected BOTtoken value: %s\n", BOTtoken.c_str());
         }
-
-        counter++;
+    } else {
+        Serial.printf("ERROR - unexpected BOTtoken value: %s\n", BOTtoken.c_str());
     }
+
+    counter++;
     
     if (sendPhoto) {
         // Turn on flash LED before taking a photo
-        //digitalWrite(FLASH_LED_PIN, HIGH);
         analogWrite(FLASH_LED_PIN, brightness_g);
 
         Serial.println("Preparing photo...");
-        sendPhotoTelegram(); 
+        std::string return_msg = sendPhotoTelegram();
+        if (!return_msg.empty()) {
+            bot.sendMessage(CHAT_ID, (std::string("ERROR: Taking and/or when sending photo: ") + return_msg).c_str());
+            Serial.println((std::string("ERROR: Taking and/or when sending photo: ") + return_msg).c_str());
+        } 
+        
         sendPhoto = false;
-        Serial.println("Photo sent!");
+        Serial.println("After sending or attempting to take and send the photo");
         
         // Turn off flash LED after taking a photo
-        //digitalWrite(FLASH_LED_PIN, LOW);
         analogWrite(FLASH_LED_PIN, 0);
     }
     
