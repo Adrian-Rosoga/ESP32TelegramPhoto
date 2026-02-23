@@ -37,4 +37,9 @@ upload_port = 192.168.1.196
 upload_flags = --host_ip=192.168.1.131
 
 3) Upload from command line:
+
+# Serial
+pio run -t upload -e esp32cam
+
+# OTA
 pio run -t upload -e esp32cam_ota
