@@ -2,7 +2,6 @@
 #include <HardwareSerial.h>
 
 
-const char* ntpServer = "pool.ntp.org";
 const long gmtOffset_sec = 0;
 const int daylightOffset_sec = 3600;
 
@@ -10,7 +9,17 @@ struct tm timeinfo;
 
 
 void setup_time() {
-  configTime(gmtOffset_sec, daylightOffset_sec, ntpServer);
+  configTime(gmtOffset_sec, daylightOffset_sec, 
+             "pool.ntp.org", "time.nist.gov", "time.google.com");
+  
+  struct tm t;
+  Serial.print("Waiting for NTP sync");
+  int retry = 0;
+  while (!getLocalTime(&t, 1000) && retry < 15) {
+    Serial.print(".");
+    retry++;
+  }
+  Serial.println(retry < 15 ? "Setup time OK" : "Setup time FAILED");
 }
 
 

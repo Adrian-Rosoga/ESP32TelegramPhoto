@@ -18,6 +18,7 @@ https://RandomNerdTutorials.com/telegram-esp32-cam-photo-arduino/
 
 #include "ntp_time.h"
 #include "credentials.h"    // WIFI and Telegram credentials - sample below
+#include "version.h"        // Auto-generated: VERSION_FULL, VERSION_STRING, etc.
 
 // Debug logging control
 #define ENABLE_DEBUG 1
@@ -42,13 +43,15 @@ const char* BOTtoken_2 = "XXX";
 const char* OTA_PASSWORD = "";
 */
 
-std::string __version__ = "1.4 - 2026-02-23";
+std::string __version__ = VERSION_FULL;
 
 #define FLASH_LED_PIN 4
 
 // Main configs
 const int HOUR_TO_SEND_PHOTO = 5; // 24-hour format
-bool sendPhoto = false;
+bool enablePhotoSending_g = false;
+bool enableRestart_g = false;
+
 WiFiClientSecure clientTCP;
 std::string BOTtoken = "DummyBotToken";             // Will be set in setup()
 UniversalTelegramBot bot("", clientTCP); // token updated in setup()
@@ -216,7 +219,7 @@ void handleNewMessages(int numNewMessages) {
         }
 
         if (text == "/photo" || text == "/p" || text == "p" || text == "P") {
-            sendPhoto = true;
+            enablePhotoSending_g = true;
             Serial.println("New photo request");
         }
 
@@ -238,6 +241,20 @@ void handleNewMessages(int numNewMessages) {
             bot.sendMessage(CHAT_ID, msgBuf);
         }
 
+        if (!text.empty() && (text[0] == 'r' || text[0] == 'R')) {
+            Serial.print("ESP32 restarting on user command...");
+            char msgBuf[64];
+            snprintf(msgBuf, sizeof(msgBuf), "ESP32 restarting on user command...");
+            bot.sendMessage(CHAT_ID, msgBuf);
+            delay(1000);
+            enableRestart_g = true;
+        }
+
+        if (!text.empty() && (text[0] == 'w' || text[0] == 'W')) {
+            Serial.print("Responding to who request...");
+            who();
+        }
+
         if (!text.empty() && (text[0] == 'i' || text[0] == 'I'))  {
             brightness_g = get_brightness(text);
             Serial.print("Set flash brightness to: ");
@@ -245,7 +262,7 @@ void handleNewMessages(int numNewMessages) {
             char snapBuf[128];
             snprintf(snapBuf, sizeof(snapBuf), "Snap Request %s (flash %d)", getDateTimeString().c_str(), brightness_g);
             bot.sendMessage(CHAT_ID, snapBuf);
-            sendPhoto = true;
+            enablePhotoSending_g = true;
             Serial.print("New photo request with brightness: ");
             Serial.println(brightness_g);
         }
@@ -426,6 +443,16 @@ IPAddress connect_to_wifi() {
 }
 
 
+void who() {
+    const std::string MAC = std::string(WiFi.macAddress().c_str());
+    const char* ip_address = WiFi.localIP().toString().c_str();
+
+    char dailyBuf[256];
+    snprintf(dailyBuf, sizeof(dailyBuf), "ESP32 v%s!\n\nOTA enabled!\n\nHostname=%s\nMAC=%s\nIP=%s\nJPEG Quality=%d\n\n%s",  __version__.c_str(), ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address, jpeg_quality_g, getDateTimeString().c_str());
+    bot.sendMessage(CHAT_ID, dailyBuf);
+}
+
+
 void setup() {
     WRITE_PERI_REG(RTC_CNTL_BROWN_OUT_REG, 0); 
     // Init Serial Monitor
@@ -548,7 +575,7 @@ void loop() {
                 currentDateTime->tm_yday != current_day) {
             Serial.println("======= Sending the daily photo =======");
             
-            sendPhoto = true;
+            enablePhotoSending_g = true;
             current_day = currentDateTime->tm_yday;
 
             char dailyBuf[128];
@@ -560,14 +587,20 @@ void loop() {
         // Testing: periodic photo every N minutes
         // Water pressure heating system 
         //
-        if (counter % (minutes_g * 60) == 0) {
+        static time_t old_secs = 0;
+        time_t now;
+        auto secs = time(&now);  // returns seconds since 1970-01-01
+
+        if (secs - old_secs >= minutes_g * 60) {
             Serial.println("======= Sending photo =======");
             
-            sendPhoto = true;
+            enablePhotoSending_g = true;
 
             char dailyBuf[128];
-            snprintf(dailyBuf, sizeof(dailyBuf), "Snap every %d minutes (flash %d) - %s", minutes_g, brightness_g, getDateTimeString().c_str());
+            snprintf(dailyBuf, sizeof(dailyBuf), "Snap every %d minute(s) (flash %d) - %s", minutes_g, brightness_g, getDateTimeString().c_str());
             bot.sendMessage(CHAT_ID, dailyBuf);
+
+            old_secs = secs;
         }
     } else {
         Serial.printf("ERROR - unexpected BOTtoken value: %s\n", BOTtoken.c_str());
@@ -575,22 +608,30 @@ void loop() {
 
     counter++;
     
-    if (sendPhoto) {
+    if (enablePhotoSending_g) {
         // Turn on flash LED before taking a photo
         analogWrite(FLASH_LED_PIN, brightness_g);
 
         Serial.println("Preparing photo...");
         std::string return_msg = sendPhotoTelegram();
+
         if (!return_msg.empty()) {
             bot.sendMessage(CHAT_ID, (std::string("ERROR: Taking and/or when sending photo: ") + return_msg).c_str());
             Serial.println((std::string("ERROR: Taking and/or when sending photo: ") + return_msg).c_str());
         } 
         
-        sendPhoto = false;
+        enablePhotoSending_g = false;
         Serial.println("After sending or attempting to take and send the photo");
         
         // Turn off flash LED after taking a photo
         analogWrite(FLASH_LED_PIN, 0);
+    }
+
+    if (enableRestart_g) {
+        // TODO: Bad, goes into an infinite reboot loop
+        //Serial.println("Restarting now...");
+        //delay(1000);
+        //ESP.restart();
     }
     
     if (millis() > lastTimeBotRan + botRequestDelay)  {
