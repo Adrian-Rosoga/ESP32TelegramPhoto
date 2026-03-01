@@ -62,7 +62,7 @@ int jpeg_quality_g = JPEG_QUALITY_DEFAULT; // 10 was the original default, value
 bool flashState = LOW;
 int brightness_g = 255;   // Flash LED brightness (0-255) - This default is too bright
 
-int minutes_g = 5;        // Minutes interval for automatic photo sending, default is 5 minutes
+int minutes_g = 60;        // Minutes interval for automatic photo sending, default is 5 minutes
 
 // Checks for new Telegram messages every 1 second.
 const int botRequestDelay = 1000;
@@ -296,7 +296,7 @@ void handleNewMessages(int numNewMessages) {
 }
 
 
-std::string sendPhotoTelegram() {
+std::string sendPhotoTelegram(const char* photo_caption) {
     const char* myDomain = "api.telegram.org";
     // Response buffer to avoid Arduino String heap growth
     const size_t RESPONSE_BUF_SIZE = 2048;
@@ -306,11 +306,16 @@ std::string sendPhotoTelegram() {
 
     camera_fb_t *fb = NULL;
 
+    static bool first_stale_photo_taken = false;
+
     // Dispose a possibly stale frame (improves first-frame quality)
-    fb = esp_camera_fb_get();
-    if (fb) {
-        esp_camera_fb_return(fb);
-        fb = NULL;
+    if (!first_stale_photo_taken) {
+        fb = esp_camera_fb_get();
+        if (fb) {
+            esp_camera_fb_return(fb);
+            fb = NULL;
+        }
+        first_stale_photo_taken = true;
     }
 
     // Take a new photo with a few retries
@@ -339,11 +344,8 @@ std::string sendPhotoTelegram() {
         const char headPart2[] = "\r\n--M0RVL\r\nContent-Disposition: form-data; name=\"photo\"; filename=\"esp32-cam.jpg\"\r\nContent-Type: image/jpeg\r\n\r\n";
         const char tailArr[] = "\r\n--M0RVL--\r\n";
 
-        // Build caption with timestamp
-        std::string caption = "Snap - " + getDateTimeString();
-
         size_t imageLen = fb->len;
-        size_t extraLen = strlen(headPart1) + strlen(CHAT_ID) + strlen(captionPart) + caption.length() + strlen(headPart2) + strlen(tailArr);
+        size_t extraLen = strlen(headPart1) + strlen(CHAT_ID) + strlen(captionPart) + strlen(photo_caption) + strlen(headPart2) + strlen(tailArr);
         size_t totalLen = imageLen + extraLen;
         // Stream POST request line and headers without creating temporary Strings
         clientTCP.print("POST /bot");
@@ -361,7 +363,7 @@ std::string sendPhotoTelegram() {
         clientTCP.print(headPart1);
         clientTCP.print(CHAT_ID);
         clientTCP.print(captionPart);
-        clientTCP.print(caption.c_str());
+        clientTCP.print(photo_caption);
         clientTCP.print(headPart2);
     
         // Send image in fixed-size chunks (avoid missing final chunk)
@@ -402,6 +404,7 @@ std::string sendPhotoTelegram() {
         Serial.println(responseBuf);
     }
     else {
+        esp_camera_fb_return(fb);  // Avoid leaking the camera frame buffer
         const char* err = "ERROR: Connection to api.telegram.org failed.";
         Serial.println(err);
         return std::string(err);
@@ -445,11 +448,13 @@ IPAddress connect_to_wifi() {
 
 void who() {
     const std::string MAC = std::string(WiFi.macAddress().c_str());
-    const char* ip_address = WiFi.localIP().toString().c_str();
+    // Store toString() result to keep the buffer alive while we use c_str()
+    String ip_str = WiFi.localIP().toString();
+    const char* ip_address = ip_str.c_str();
 
-    char dailyBuf[256];
-    snprintf(dailyBuf, sizeof(dailyBuf), "ESP32 v%s!\n\nOTA enabled!\n\nHostname=%s\nMAC=%s\nIP=%s\nJPEG Quality=%d\n\n%s",  __version__.c_str(), ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address, jpeg_quality_g, getDateTimeString().c_str());
-    bot.sendMessage(CHAT_ID, dailyBuf);
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer), "ESP32 v%s!\n\nOTA enabled!\n\nHostname=%s\nMAC=%s\nIP=%s\nJPEG Quality=%d\n\n%s",  __version__.c_str(), ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address, jpeg_quality_g, getDateTimeString().c_str());
+    bot.sendMessage(CHAT_ID, buffer);
 }
 
 
@@ -539,9 +544,9 @@ void setup() {
 
     // Send startup message after 10 seconds delay
     delay(10000);
-    char dailyBuf[256];
-    snprintf(dailyBuf, sizeof(dailyBuf), "ESP32 v%s up!\n\nOTA enabled!\n\nHostname=%s\nMAC=%s\nIP=%s\nJPEG Quality=%d\n\n%s",  __version__.c_str(), ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address.toString().c_str(), jpeg_quality_g, getDateTimeString().c_str());
-    bot.sendMessage(CHAT_ID, dailyBuf);
+    char buffer[256];
+    snprintf(buffer, sizeof(buffer), "ESP32 v%s\n\nOTA enabled!\n\nHostname=%s\nMAC=%s\nIP=%s\nJPEG Quality=%d\n\n%s",  __version__.c_str(), ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address.toString().c_str(), jpeg_quality_g, getDateTimeString().c_str());
+    bot.sendMessage(CHAT_ID, buffer);
 }
 
 
@@ -563,7 +568,8 @@ void loop() {
 
     static int counter = 0;
 
-    if (BOTtoken == std::string(BOTtoken_1)) {
+    char photo_caption[128];
+    if (BOTtoken.c_str() && strcmp(BOTtoken.c_str(), BOTtoken_1) == 0) {
         //
         // Daily photo at a specific hour of the day (e.g., 5 AM)
         // Water Softener
@@ -577,12 +583,11 @@ void loop() {
             
             enablePhotoSending_g = true;
             current_day = currentDateTime->tm_yday;
-
-            char dailyBuf[128];
-            snprintf(dailyBuf, sizeof(dailyBuf), "Daily Snap (flash %d) - %s", brightness_g, getDateTimeString().c_str());
-            bot.sendMessage(CHAT_ID, dailyBuf);
+   
+            snprintf(photo_caption, sizeof(photo_caption), "Daily Snap (Flash %d) - %s", brightness_g, getDateTimeString().c_str());
+            //bot.sendMessage(CHAT_ID, photo_caption);
         }
-    } else if (BOTtoken == std::string(BOTtoken_2)) {
+    } else if (strcmp(BOTtoken.c_str(), BOTtoken_2) == 0) {
         //
         // Testing: periodic photo every N minutes
         // Water pressure heating system 
@@ -596,9 +601,8 @@ void loop() {
             
             enablePhotoSending_g = true;
 
-            char dailyBuf[128];
-            snprintf(dailyBuf, sizeof(dailyBuf), "Snap every %d minute(s) (flash %d) - %s", minutes_g, brightness_g, getDateTimeString().c_str());
-            bot.sendMessage(CHAT_ID, dailyBuf);
+            snprintf(photo_caption, sizeof(photo_caption), "Snap every %d minute(s) (Flash %d) - %s", minutes_g, brightness_g, getDateTimeString().c_str());
+            //bot.sendMessage(CHAT_ID, photo_caption);
 
             old_secs = secs;
         }
@@ -613,7 +617,10 @@ void loop() {
         analogWrite(FLASH_LED_PIN, brightness_g);
 
         Serial.println("Preparing photo...");
-        std::string return_msg = sendPhotoTelegram();
+        std::string return_msg = sendPhotoTelegram(photo_caption);
+
+        // Turn off flash LED after taking a photo
+        analogWrite(FLASH_LED_PIN, 0);
 
         if (!return_msg.empty()) {
             bot.sendMessage(CHAT_ID, (std::string("ERROR: Taking and/or when sending photo: ") + return_msg).c_str());
@@ -622,9 +629,6 @@ void loop() {
         
         enablePhotoSending_g = false;
         Serial.println("After sending or attempting to take and send the photo");
-        
-        // Turn off flash LED after taking a photo
-        analogWrite(FLASH_LED_PIN, 0);
     }
 
     if (enableRestart_g) {
