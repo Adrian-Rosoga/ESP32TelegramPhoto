@@ -51,14 +51,17 @@ std::string __version__ = VERSION_FULL;
 const int HOUR_TO_SEND_PHOTO = 5; // 24-hour format
 bool enablePhotoSending_g = false;
 bool enableOneOffPhotoSending_g = false;
-bool enableRestart_g = false;
 
 WiFiClientSecure clientTCP;
 std::string BOTtoken = "ToBeUpdatedInSetup"; // Updated in setup()
 UniversalTelegramBot bot("", clientTCP);
 
-const int JPEG_QUALITY_DEFAULT = 10; // TODO: Taking pictures fails if quality is set to maximum quality, i.e. 0!
-int jpeg_quality_g = JPEG_QUALITY_DEFAULT; // 10 was the original default, values from 0 to 63, LOWER number means HIGHER quality
+// JPEG quality range: 0-63 (lower = higher quality).
+// Values below 4 cause capture failures at UXGA because the uncompressed
+// output can exceed the DMA buffer the JPEG encoder allocates.
+const int JPEG_QUALITY_MIN = 4;
+const int JPEG_QUALITY_DEFAULT = 10;
+int jpeg_quality_g = JPEG_QUALITY_DEFAULT;
 
 bool flashState = LOW;
 int brightness_g = 255;     // Flash LED brightness (0-255) - This default is too bright
@@ -115,7 +118,7 @@ void configInitCamera() {
     if (psramFound()) {
         config.frame_size = FRAMESIZE_UXGA;
         config.jpeg_quality = jpeg_quality_g;  // 0-63 lower number means higher quality
-        config.fb_count = 1;
+        config.fb_count = 2;  // 2 buffers needed for CAMERA_GRAB_LATEST to work properly
     } else {
         config.frame_size = FRAMESIZE_SVGA;
         config.jpeg_quality = 12;  // 0-63 lower number means higher quality
@@ -154,7 +157,7 @@ void configInitCamera() {
 }
 
 
-int extract_parameter(const std::string &text, char delimiter=' ') {
+int extract_parameter(const std::string &text, int minVal = 0, int maxVal = 255) {
     // Robust parameter parsing: accept forms like "b10", "b 10", "b=10"
     int value = -1;
     if (text.length() < 2) return value; // Not enough length for a command and parameter
@@ -173,6 +176,9 @@ int extract_parameter(const std::string &text, char delimiter=' ') {
     trim(num);
     if (!num.empty()) {
         value = atoi(num.c_str());
+        // Clamp to valid range
+        if (value < minVal) value = minVal;
+        if (value > maxVal) value = maxVal;
     }
     return value;
 }
@@ -207,24 +213,35 @@ void handleNewMessages(int numNewMessages) {
         std::string from_name = std::string(bot.messages[i].from_name.c_str());
 
         if (text == "/start") {
-            char welcomeBuf[192];
-            snprintf(welcomeBuf, sizeof(welcomeBuf), "Welcome, %s!\nUse the following commands to interact with the ESP32-CAM\n/photo or /p or p or P: takes a new photo\n/flash or /f or f or F: toggles flash LED\n", from_name.c_str());
+            char welcomeBuf[512];
+            snprintf(welcomeBuf, sizeof(welcomeBuf),
+                "Welcome, %s!\n"
+                "Commands:\n"
+                "  /photo /p p P - Take a photo\n"
+                "  /flash /f f F - Toggle flash LED\n"
+                "  b<N> - Set flash brightness (0-255)\n"
+                "  m<N> - Set auto-snap interval (minutes)\n"
+                "  i<N> - Snap with flash brightness N\n"
+                "  q<N> - Set JPEG quality (0-63, lower=better)\n"
+                "  w - Device info\n"
+                "  r - Restart device\n",
+                from_name.c_str());
             bot.sendMessage(CHAT_ID, welcomeBuf);
         }
 
-        if (text == "/flash" || text == "/f" || text == "f" || text == "F") {
+        else if (text == "/flash" || text == "/f" || text == "f" || text == "F") {
             flashState = !flashState;
             digitalWrite(FLASH_LED_PIN, flashState);
             Serial.println("Change flash LED state");
         }
 
-        if (text == "/photo" || text == "/p" || text == "p" || text == "P") {
+        else if (text == "/photo" || text == "/p" || text == "p" || text == "P") {
             enableOneOffPhotoSending_g = true;
             Serial.println("New snap request");
         }
 
-        if (!text.empty() && (text[0] == 'b' || text[0] == 'B')) {
-            brightness_g = extract_parameter(text);
+        else if (!text.empty() && (text[0] == 'b' || text[0] == 'B')) {
+            brightness_g = extract_parameter(text, 0, 255);
             Serial.print("Set flash brightness to: ");
             Serial.println(brightness_g);
             char msgBuf[64];
@@ -232,8 +249,8 @@ void handleNewMessages(int numNewMessages) {
             bot.sendMessage(CHAT_ID, msgBuf);
         }
 
-        if (!text.empty() && (text[0] == 'm' || text[0] == 'M')) {
-            minutes_g = extract_parameter(text);
+        else if (!text.empty() && (text[0] == 'm' || text[0] == 'M')) {
+            minutes_g = extract_parameter(text, 1, 1440);
             Serial.print("Set snap interval to ");
             Serial.print(minutes_g);
             Serial.println(" minute(s)");
@@ -242,22 +259,23 @@ void handleNewMessages(int numNewMessages) {
             bot.sendMessage(CHAT_ID, msgBuf);
         }
 
-        if (!text.empty() && (text[0] == 'r' || text[0] == 'R')) {
-            Serial.print("ESP32 restarting on user command...");
-            char msgBuf[64];
-            snprintf(msgBuf, sizeof(msgBuf), "ESP32 restarting on user command...");
-            bot.sendMessage(CHAT_ID, msgBuf);
+        else if (!text.empty() && (text[0] == 'r' || text[0] == 'R')) {
+            Serial.println("ESP32 restarting on user command...");
+            bot.sendMessage(CHAT_ID, "ESP32 restarting on user command...");
+            // Drain pending messages so the restart command isn't re-processed on reboot
+            delay(500);
+            bot.getUpdates(bot.last_message_received + 1);
             delay(1000);
-            enableRestart_g = true;
+            ESP.restart();
         }
 
-        if (!text.empty() && (text[0] == 'w' || text[0] == 'W')) {
-            Serial.print("Responding to who request...");
+        else if (!text.empty() && (text[0] == 'w' || text[0] == 'W')) {
+            Serial.println("Responding to who request...");
             who();
         }
 
-        if (!text.empty() && (text[0] == 'i' || text[0] == 'I'))  {
-            brightness_g = extract_parameter(text);
+        else if (!text.empty() && (text[0] == 'i' || text[0] == 'I'))  {
+            brightness_g = extract_parameter(text, 0, 255);
             Serial.print("Set flash to ");
             Serial.println(brightness_g);
             
@@ -271,22 +289,24 @@ void handleNewMessages(int numNewMessages) {
             Serial.println(brightness_g);
         }
 
-        // TODO: Here I tried to add a command to set the JPEG quality, but it seems that reconfiguring the camera make it go in an unstable loop in which the ESP32 keeps restarting.
-        if (!text.empty() && (text[0] == 'q' || text[0] == 'Q')) {
-            jpeg_quality_g = extract_parameter(text);
+        else if (!text.empty() && (text[0] == 'q' || text[0] == 'Q')) {
+            jpeg_quality_g = extract_parameter(text, JPEG_QUALITY_MIN, 63);
             Serial.print("Set JPEG quality to: ");
             Serial.println(jpeg_quality_g);
 
-            // TODO: configInitCamera() causes infinite loop, ESP32 restarts. Need to investigate if it's possible to reconfigure the camera on the fly or if it requires a restart. For now, just set the variable and use it on next reboot.
-            //configInitCamera(); // Re-init camera with new JPEG quality
+            // Change quality at runtime via sensor API (no camera reinit needed)
+            sensor_t *s = esp_camera_sensor_get();
+            if (s) {
+                s->set_quality(s, jpeg_quality_g);
+            }
             
             char msgBuf[64];
-            snprintf(msgBuf, sizeof(msgBuf), "Set JPEG quality to: %d. It does not take effect though", jpeg_quality_g);
+            snprintf(msgBuf, sizeof(msgBuf), "Set JPEG quality to: %d", jpeg_quality_g);
             bot.sendMessage(CHAT_ID, msgBuf);
         }
 
         // Testing various things
-        if (text == "t" || text == "T") {
+        else if (text == "t" || text == "T") {
             Serial.println("Testing now...");
             bot.sendMessage(CHAT_ID, "Testing in progress...");
             for (int b = 0; b < 50; b++) {
@@ -310,17 +330,15 @@ std::string sendPhotoTelegram(const char* photo_caption) {
 
     camera_fb_t *fb = NULL;
 
-    static bool first_stale_photo_taken = false;
-
-    // Dispose a possibly stale frame (improves first-frame quality)
-    if (!first_stale_photo_taken) {
-        fb = esp_camera_fb_get();
-        if (fb) {
-            esp_camera_fb_return(fb);
-            fb = NULL;
-        }
-        first_stale_photo_taken = true;
+    // Discard stale buffered frame(s) before capturing the real photo.
+    // Even with fb_count=2 and CAMERA_GRAB_LATEST, an explicit discard
+    // ensures we get a frame captured *after* the flash LED is turned on.
+    fb = esp_camera_fb_get();
+    if (fb) {
+        esp_camera_fb_return(fb);
+        fb = NULL;
     }
+    delay(150);  // Let the sensor adjust to current lighting / flash
 
     // Take a new photo with a few retries
     int captureTries = 0;
@@ -333,7 +351,7 @@ std::string sendPhotoTelegram(const char* photo_caption) {
     }
     if (!fb) {
         Serial.println("Camera capture failed after retries");
-        return "Camera capture failed";
+        return "Camera capture failed after retries";
     }
     
     Serial.print("Connect to ");
@@ -414,8 +432,10 @@ std::string sendPhotoTelegram(const char* photo_caption) {
         return std::string(err);
     }
     
-    // ADIRX
-    //return std::string(responseBuf);
+    // Check if Telegram API reported an error
+    if (respLen > 0 && strstr(responseBuf, "\"ok\":false") != nullptr) {
+        return "Telegram API returned an error";
+    }
     return std::string("");
 }
 
@@ -424,7 +444,6 @@ IPAddress connect_to_wifi() {
     WiFi.mode(WIFI_STA);
     Serial.print("\nConnecting to WIFI ");
     Serial.println(SSID);
-    clientTCP.setCACert(TELEGRAM_CERTIFICATE_ROOT); // Add root certificate for api.telegram.org
     WiFi.begin(SSID, WIFI_PASSWORD);
 
     // Exponential backoff reconnect attempts
@@ -472,6 +491,9 @@ void setup() {
 
     // Config and init the camera
     configInitCamera();
+
+    // Set root certificate for api.telegram.org (once, before any TLS connection)
+    clientTCP.setCACert(TELEGRAM_CERTIFICATE_ROOT);
 
     Serial.print("\n\n=== ESP32 Starting up...");
 
@@ -565,8 +587,10 @@ void loop() {
     unsigned long currentMillis = millis();
     // If WiFi is down, try reconnecting every CHECK_WIFI_TIME_MSECS milliseconds
     if ((WiFi.status() != WL_CONNECTED) && (currentMillis - previousMillis >= CHECK_WIFI_TIME_MSECS)) {
-        connect_to_wifi();
-        bot.sendMessage(CHAT_ID, "Reconnected to WiFi");
+        IPAddress ip = connect_to_wifi();
+        if (ip != IPAddress(0, 0, 0, 0)) {
+            bot.sendMessage(CHAT_ID, "Reconnected to WiFi");
+        }
         previousMillis = currentMillis;
     }
 
@@ -578,7 +602,6 @@ void loop() {
         // Daily photo at a specific hour of the day (e.g., 5 AM)
         // Water Softener
         //
-        static int current_hour = -1;
         static int current_day = -1;
         struct tm* currentDateTime = getDateTime();
         if (currentDateTime->tm_hour == HOUR_TO_SEND_PHOTO &&
@@ -643,12 +666,7 @@ void loop() {
         Serial.println("After sending or attempting to take and send the photo");
     }
 
-    if (enableRestart_g) {
-        // TODO: Bad, goes into an infinite reboot loop
-        //Serial.println("Restarting now...");
-        //delay(1000);
-        //ESP.restart();
-    }
+    // Restart is now handled directly in handleNewMessages after draining pending messages
     
     if (millis() > lastTimeBotRan + requestDelayInMilliseconds)  {
         int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
