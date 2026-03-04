@@ -6,6 +6,7 @@ TODO - High Prio:
 TODO - LowPrio:
 - 12 Dec 2025 - Fix timestamp message if not NPT sync-ed.
 If failed it outputs "Snap - Thursday 1970-01-01 00:01:03"
+- Add a photo counter to see how many photos are sent before a problem, if any
 
 - HOWTO - OTA
 

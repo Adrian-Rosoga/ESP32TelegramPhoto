@@ -50,22 +50,22 @@ std::string __version__ = VERSION_FULL;
 // Main configs
 const int HOUR_TO_SEND_PHOTO = 5; // 24-hour format
 bool enablePhotoSending_g = false;
+bool enableOneOffPhotoSending_g = false;
 bool enableRestart_g = false;
 
 WiFiClientSecure clientTCP;
-std::string BOTtoken = "DummyBotToken";             // Will be set in setup()
-UniversalTelegramBot bot("", clientTCP); // token updated in setup()
+std::string BOTtoken = "ToBeUpdatedInSetup"; // Updated in setup()
+UniversalTelegramBot bot("", clientTCP);
 
-const int JPEG_QUALITY_DEFAULT = 10; // TODO: Taking pictures ends in failure if quality is set to 0!
+const int JPEG_QUALITY_DEFAULT = 10; // TODO: Taking pictures fails if quality is set to maximum quality, i.e. 0!
 int jpeg_quality_g = JPEG_QUALITY_DEFAULT; // 10 was the original default, values from 0 to 63, LOWER number means HIGHER quality
 
 bool flashState = LOW;
-int brightness_g = 255;   // Flash LED brightness (0-255) - This default is too bright
-
-int minutes_g = 60;        // Minutes interval for automatic photo sending, default is 5 minutes
+int brightness_g = 255;     // Flash LED brightness (0-255) - This default is too bright
+int minutes_g = 60;         // Minutes interval for automatic photo sending, default is 5 minutes
 
 // Checks for new Telegram messages every 1 second.
-const int botRequestDelay = 1000;
+const int requestDelayInMilliseconds = 1 * 1000;
 unsigned long lastTimeBotRan;
 
 // CAMERA_MODEL_AI_THINKER
@@ -154,10 +154,10 @@ void configInitCamera() {
 }
 
 
-int get_brightness(const std::string &text, char delimiter=' ') {
-    // Robust brightness parsing: accept forms like "b10", "b 10", "b=10"
-    int brightness = -1;
-    if (text.length() < 2) return brightness;
+int extract_parameter(const std::string &text, char delimiter=' ') {
+    // Robust parameter parsing: accept forms like "b10", "b 10", "b=10"
+    int value = -1;
+    if (text.length() < 2) return value; // Not enough length for a command and parameter
     // take everything after the first char
     std::string num = text.substr(1);
     // trim whitespace
@@ -172,9 +172,9 @@ int get_brightness(const std::string &text, char delimiter=' ') {
     if (!num.empty() && (num[0] == '=' || num[0] == ':')) num = num.substr(1);
     trim(num);
     if (!num.empty()) {
-        brightness = atoi(num.c_str());
+        value = atoi(num.c_str());
     }
-    return brightness;
+    return value;
 }
 
 
@@ -219,12 +219,12 @@ void handleNewMessages(int numNewMessages) {
         }
 
         if (text == "/photo" || text == "/p" || text == "p" || text == "P") {
-            enablePhotoSending_g = true;
-            Serial.println("New photo request");
+            enableOneOffPhotoSending_g = true;
+            Serial.println("New snap request");
         }
 
         if (!text.empty() && (text[0] == 'b' || text[0] == 'B')) {
-            brightness_g = get_brightness(text);
+            brightness_g = extract_parameter(text);
             Serial.print("Set flash brightness to: ");
             Serial.println(brightness_g);
             char msgBuf[64];
@@ -233,11 +233,12 @@ void handleNewMessages(int numNewMessages) {
         }
 
         if (!text.empty() && (text[0] == 'm' || text[0] == 'M')) {
-            minutes_g = get_brightness(text);
-            Serial.print("Set minutes interval to: ");
-            Serial.println(minutes_g);
+            minutes_g = extract_parameter(text);
+            Serial.print("Set snap interval to ");
+            Serial.print(minutes_g);
+            Serial.println(" minute(s)");
             char msgBuf[64];
-            snprintf(msgBuf, sizeof(msgBuf), "Set minutes interval to: %d", minutes_g);
+            snprintf(msgBuf, sizeof(msgBuf), "Set snap interval to %d minute(s)", minutes_g);
             bot.sendMessage(CHAT_ID, msgBuf);
         }
 
@@ -256,20 +257,23 @@ void handleNewMessages(int numNewMessages) {
         }
 
         if (!text.empty() && (text[0] == 'i' || text[0] == 'I'))  {
-            brightness_g = get_brightness(text);
-            Serial.print("Set flash brightness to: ");
+            brightness_g = extract_parameter(text);
+            Serial.print("Set flash to ");
             Serial.println(brightness_g);
+            
             char snapBuf[128];
-            snprintf(snapBuf, sizeof(snapBuf), "Snap Request %s (flash %d)", getDateTimeString().c_str(), brightness_g);
+            snprintf(snapBuf, sizeof(snapBuf), "Snap request (Flash %d) - %s", brightness_g, getDateTimeString().c_str());
             bot.sendMessage(CHAT_ID, snapBuf);
-            enablePhotoSending_g = true;
-            Serial.print("New photo request with brightness: ");
+
+            enableOneOffPhotoSending_g = true;
+
+            Serial.print("Snap request with flash ");
             Serial.println(brightness_g);
         }
 
         // TODO: Here I tried to add a command to set the JPEG quality, but it seems that reconfiguring the camera make it go in an unstable loop in which the ESP32 keeps restarting.
         if (!text.empty() && (text[0] == 'q' || text[0] == 'Q')) {
-            jpeg_quality_g = get_brightness(text);
+            jpeg_quality_g = extract_parameter(text);
             Serial.print("Set JPEG quality to: ");
             Serial.println(jpeg_quality_g);
 
@@ -436,10 +440,9 @@ IPAddress connect_to_wifi() {
         Serial.println();
         Serial.println("Failed to connect to WiFi after attempts");
         // leave function and allow caller to decide (loop() will retry periodically)
-        return IPAddress(0,0,0,0);
+        return IPAddress(0, 0, 0, 0);
     }
-    Serial.println();
-    Serial.print("ESP32 IP: ");
+    Serial.print("\nESP32 IP: ");
     Serial.println(WiFi.localIP());
 
     return WiFi.localIP();
@@ -552,24 +555,25 @@ void setup() {
 
 void loop() {
     //Serial.println("Top of loop()");
+
     // Handle OTA events
     ArduinoOTA.handle();
     
     // Reconnect to WiFi if connection is lost
     static unsigned long previousMillis = 0;
-    const unsigned long CHECK_WIFI_TIME_MSECS = 30000;
+    const unsigned long CHECK_WIFI_TIME_MSECS = 30 * 1000;
     unsigned long currentMillis = millis();
-    // If WiFi is down, try reconnecting every CHECK_WIFI_TIME seconds
+    // If WiFi is down, try reconnecting every CHECK_WIFI_TIME_MSECS milliseconds
     if ((WiFi.status() != WL_CONNECTED) && (currentMillis - previousMillis >= CHECK_WIFI_TIME_MSECS)) {
         connect_to_wifi();
         bot.sendMessage(CHAT_ID, "Reconnected to WiFi");
         previousMillis = currentMillis;
     }
 
-    static int counter = 0;
+    static int photoSendCounter = 0;
 
     char photo_caption[128];
-    if (BOTtoken.c_str() && strcmp(BOTtoken.c_str(), BOTtoken_1) == 0) {
+    if (strcmp(BOTtoken.c_str(), BOTtoken_1) == 0) {
         //
         // Daily photo at a specific hour of the day (e.g., 5 AM)
         // Water Softener
@@ -583,8 +587,9 @@ void loop() {
             
             enablePhotoSending_g = true;
             current_day = currentDateTime->tm_yday;
-   
-            snprintf(photo_caption, sizeof(photo_caption), "Daily Snap (Flash %d) - %s", brightness_g, getDateTimeString().c_str());
+                    
+            photoSendCounter++;
+            snprintf(photo_caption, sizeof(photo_caption), "Daily Snap (Flash %d) - %s (count %d)", brightness_g, getDateTimeString().c_str(), photoSendCounter);
             //bot.sendMessage(CHAT_ID, photo_caption);
         }
     } else if (strcmp(BOTtoken.c_str(), BOTtoken_2) == 0) {
@@ -601,7 +606,8 @@ void loop() {
             
             enablePhotoSending_g = true;
 
-            snprintf(photo_caption, sizeof(photo_caption), "Snap every %d minute(s) (Flash %d) - %s", minutes_g, brightness_g, getDateTimeString().c_str());
+            photoSendCounter++;
+            snprintf(photo_caption, sizeof(photo_caption), "Snap every %d minute(s) (Flash %d) - %s (count %d)", minutes_g, brightness_g, getDateTimeString().c_str(), photoSendCounter);
             //bot.sendMessage(CHAT_ID, photo_caption);
 
             old_secs = secs;
@@ -610,9 +616,14 @@ void loop() {
         Serial.printf("ERROR - unexpected BOTtoken value: %s\n", BOTtoken.c_str());
     }
 
-    counter++;
+    if (enableOneOffPhotoSending_g) {
+        photoSendCounter++;
+        snprintf(photo_caption, sizeof(photo_caption), "One-off Snap (Flash %d) - %s (count %d)", brightness_g, getDateTimeString().c_str(), photoSendCounter);
+        //bot.sendMessage(CHAT_ID, photo_caption);
+         Serial.println("One-off photo sending enabled");
+    }
     
-    if (enablePhotoSending_g) {
+    if (enablePhotoSending_g || enableOneOffPhotoSending_g) {
         // Turn on flash LED before taking a photo
         analogWrite(FLASH_LED_PIN, brightness_g);
 
@@ -628,6 +639,7 @@ void loop() {
         } 
         
         enablePhotoSending_g = false;
+        enableOneOffPhotoSending_g = false;
         Serial.println("After sending or attempting to take and send the photo");
     }
 
@@ -638,7 +650,7 @@ void loop() {
         //ESP.restart();
     }
     
-    if (millis() > lastTimeBotRan + botRequestDelay)  {
+    if (millis() > lastTimeBotRan + requestDelayInMilliseconds)  {
         int numNewMessages = bot.getUpdates(bot.last_message_received + 1);
         while (numNewMessages) {
             Serial.println("Got response");
