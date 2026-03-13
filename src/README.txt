@@ -44,3 +44,6 @@ pio run -t upload -e esp32cam
 
 # OTA
 pio run -t upload -e esp32cam_ota
+
+# OTA 2
+pio run -t upload -e esp32cam_ota2

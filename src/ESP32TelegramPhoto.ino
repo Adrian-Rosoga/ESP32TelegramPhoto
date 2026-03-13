@@ -612,7 +612,7 @@ void loop() {
             current_day = currentDateTime->tm_yday;
                     
             photoSendCounter++;
-            snprintf(photo_caption, sizeof(photo_caption), "Daily Snap (Flash %d) - %s (count %d)", brightness_g, getDateTimeString().c_str(), photoSendCounter);
+            snprintf(photo_caption, sizeof(photo_caption), "\xF0\x9F\x93\xB7 Daily Snap (Flash %d) - %s (count %d)", brightness_g, getDateTimeString().c_str(), photoSendCounter);
             //bot.sendMessage(CHAT_ID, photo_caption);
         }
     } else if (strcmp(BOTtoken.c_str(), BOTtoken_2) == 0) {
@@ -630,7 +630,7 @@ void loop() {
             enablePhotoSending_g = true;
 
             photoSendCounter++;
-            snprintf(photo_caption, sizeof(photo_caption), "Snap every %d minute(s) (Flash %d) - %s (count %d)", minutes_g, brightness_g, getDateTimeString().c_str(), photoSendCounter);
+            snprintf(photo_caption, sizeof(photo_caption), "\xF0\x9F\x93\xB7 Snap every %d minute(s) (Flash %d) - %s (count %d)", minutes_g, brightness_g, getDateTimeString().c_str(), photoSendCounter);
             //bot.sendMessage(CHAT_ID, photo_caption);
 
             old_secs = secs;
@@ -641,7 +641,7 @@ void loop() {
 
     if (enableOneOffPhotoSending_g) {
         photoSendCounter++;
-        snprintf(photo_caption, sizeof(photo_caption), "One-off Snap (Flash %d) - %s (count %d)", brightness_g, getDateTimeString().c_str(), photoSendCounter);
+        snprintf(photo_caption, sizeof(photo_caption), "\xF0\x9F\x93\xB7 One-off Snap (Flash %d) - %s (count %d)", brightness_g, getDateTimeString().c_str(), photoSendCounter);
         //bot.sendMessage(CHAT_ID, photo_caption);
          Serial.println("One-off photo sending enabled");
     }

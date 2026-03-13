@@ -14,7 +14,7 @@ import os
 
 # ── Manual version parts (bump these by hand when you want) ──────────
 VERSION_MAJOR = 2
-VERSION_MINOR = 0
+VERSION_MINOR = 1
 # ─────────────────────────────────────────────────────────────────────
 
 # Resolve the project root directory.

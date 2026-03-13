@@ -11,6 +11,9 @@ struct tm timeinfo;
 void setup_time() {
   configTime(gmtOffset_sec, daylightOffset_sec, 
              "pool.ntp.org", "time.nist.gov", "time.google.com");
+    // Set Europe/London timezone (handles DST automatically)
+    setenv("TZ", "GMT0BST,M3.5.0/1,M10.5.0", 1);
+    tzset();
   
   struct tm t;
   Serial.print("Waiting for NTP sync");
