@@ -13,8 +13,8 @@ import datetime
 import os
 
 # ── Manual version parts (bump these by hand when you want) ──────────
-VERSION_MAJOR = 2
-VERSION_MINOR = 1
+VERSION_MAJOR = 3
+VERSION_MINOR = 0
 # ─────────────────────────────────────────────────────────────────────
 
 # Resolve the project root directory.

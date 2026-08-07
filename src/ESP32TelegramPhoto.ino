@@ -65,7 +65,10 @@ int jpeg_quality_g = JPEG_QUALITY_DEFAULT;
 
 bool flashState = LOW;
 int brightness_g = 255;     // Flash LED brightness (0-255) - This default is too bright
-int minutes_g = 60;         // Minutes interval for automatic photo sending, default is 5 minutes
+
+// Minutes interval for automatic photo sending
+//int minutes_g = 60;       // Every hour
+int minutes_g = 24 * 60;    // Every 24 hours
 
 // Checks for new Telegram messages every 1 second.
 const int requestDelayInMilliseconds = 1 * 1000;
@@ -195,6 +198,21 @@ std::string getDateTimeString() {
 }
 
 
+void sendHelp() {
+    bot.sendMessage(CHAT_ID,
+        "Commands:\n"
+        "  /photo /p p P - Take a photo\n"
+        "  /flash /f f F - Toggle flash LED\n"
+        "  b<N> - Set flash brightness (0-255)\n"
+        "  m<N> - Set auto-snap interval (minutes)\n"
+        "  i<N> - Snap with flash brightness N\n"
+        "  q<N> - Set JPEG quality (0-63, lower=better)\n"
+        "  w - Device info\n"
+        "  r - Restart device\n"
+        "  help h - Show this help");
+}
+
+
 void handleNewMessages(int numNewMessages) {
     Serial.print("Handle new messages: ");
     Serial.println(numNewMessages);
@@ -213,20 +231,14 @@ void handleNewMessages(int numNewMessages) {
         std::string from_name = std::string(bot.messages[i].from_name.c_str());
 
         if (text == "/start") {
-            char welcomeBuf[512];
-            snprintf(welcomeBuf, sizeof(welcomeBuf),
-                "Welcome, %s!\n"
-                "Commands:\n"
-                "  /photo /p p P - Take a photo\n"
-                "  /flash /f f F - Toggle flash LED\n"
-                "  b<N> - Set flash brightness (0-255)\n"
-                "  m<N> - Set auto-snap interval (minutes)\n"
-                "  i<N> - Snap with flash brightness N\n"
-                "  q<N> - Set JPEG quality (0-63, lower=better)\n"
-                "  w - Device info\n"
-                "  r - Restart device\n",
-                from_name.c_str());
+            char welcomeBuf[64];
+            snprintf(welcomeBuf, sizeof(welcomeBuf), "Welcome, %s!", from_name.c_str());
             bot.sendMessage(CHAT_ID, welcomeBuf);
+            sendHelp();
+        }
+
+        else if (text == "help" || text == "HELP" || text == "h" || text == "H") {
+            sendHelp();
         }
 
         else if (text == "/flash" || text == "/f" || text == "f" || text == "F") {
@@ -572,6 +584,7 @@ void setup() {
     char buffer[256];
     snprintf(buffer, sizeof(buffer), "ESP32 v%s\n\nOTA enabled!\n\nHostname=%s\nMAC=%s\nIP=%s\nJPEG Quality=%d\n\n%s",  __version__.c_str(), ArduinoOTA.getHostname().c_str(), MAC.c_str(), ip_address.toString().c_str(), jpeg_quality_g, getDateTimeString().c_str());
     bot.sendMessage(CHAT_ID, buffer);
+    sendHelp();
 }
 
 
@@ -630,7 +643,7 @@ void loop() {
             enablePhotoSending_g = true;
 
             photoSendCounter++;
-            snprintf(photo_caption, sizeof(photo_caption), "\xF0\x9F\x93\xB7 Snap every %d minute(s) (Flash %d) - %s (count %d)", minutes_g, brightness_g, getDateTimeString().c_str(), photoSendCounter);
+            snprintf(photo_caption, sizeof(photo_caption), "\xF0\x9F\x93\xB7 Snap every %d minute(s) (Flash %d) - %s (count %d). Type h or help for help", minutes_g, brightness_g, getDateTimeString().c_str(), photoSendCounter);
             //bot.sendMessage(CHAT_ID, photo_caption);
 
             old_secs = secs;
